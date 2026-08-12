@@ -30,12 +30,12 @@ jobs:
         run: gradle --no-daemon assembleDebug
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk SolarFormMaker-v1.2.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk SolarFormMaker-Pro-v1.3.0.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SolarFormMaker-v1.2-APK
-          path: SolarFormMaker-v1.2.apk
+          name: SolarFormMaker-Pro-v1.3.0-APK
+          path: SolarFormMaker-Pro-v1.3.0.apk
           if-no-files-found: error
           retention-days: 30
