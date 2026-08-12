@@ -5,7 +5,7 @@
         android:theme="@style/AppTheme"
         android:supportsRtl="true">
         <activity
-            android:name=".MainActivity"
+            android:name=".ProfessionalActivity"
             android:screenOrientation="portrait"
             android:exported="true">
             <intent-filter>
@@ -13,6 +13,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity android:name=".MainActivity" android:exported="false" />
         <provider
             android:name=".SimpleFileProvider"
             android:authorities="${applicationId}.provider"
