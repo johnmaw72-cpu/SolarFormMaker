@@ -30,12 +30,12 @@ jobs:
         run: gradle --no-daemon assembleDebug
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk Infinity-Green-Power-Offer-Maker-v2.0.0.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk IGP-Organizer-Form-v3.0.0.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Infinity-Green-Power-Offer-Maker-v2.0.0-APK
-          path: Infinity-Green-Power-Offer-Maker-v2.0.0.apk
+          name: IGP-Organizer-Form-v3.0.0-APK
+          path: IGP-Organizer-Form-v3.0.0.apk
           if-no-files-found: error
           retention-days: 30
