@@ -6,7 +6,7 @@
         android:theme="@style/AppTheme"
         android:supportsRtl="true">
         <activity
-            android:name=".OrganizerRebuildV61Activity"
+            android:name=".OrganizerRebuildV62Activity"
             android:screenOrientation="portrait"
             android:exported="true">
             <intent-filter>
