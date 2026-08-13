@@ -1,3 +1,11 @@
 plugins {
     id 'com.android.application' version '8.7.3' apply false
 }
+
+subprojects {
+    afterEvaluate { p ->
+        if (p.name == 'app') {
+            p.android.sourceSets.main.java.exclude '**/OfferStudioV460Activity.java', '**/OfferStudioV470Activity.java'
+        }
+    }
+}
