@@ -6,7 +6,7 @@
         android:theme="@style/AppTheme"
         android:supportsRtl="true">
         <activity
-            android:name=".OfferStudioActivity"
+            android:name=".OfferStudioFixedActivity"
             android:screenOrientation="portrait"
             android:exported="true">
             <intent-filter>
