@@ -1,0 +1,146 @@
+key	en	ar	ku
+home	Home	الرئيسية	سەرەکی
+new_offer	New Offer	عرض جديد	پێشنیاری نوێ
+saved	Saved	المحفوظة	پاشەکەوتکراو
+catalog	Catalog	الكتالوج	کاتەلۆگ
+settings	Settings	الإعدادات	ڕێکخستنەکان
+quick_actions	Quick actions	إجراءات سريعة	کردارە خێراکان
+create_offer	Create offer	إنشاء عرض	دروستکردنی پێشنیار
+start_quote	Start a new quotation	ابدأ عرض سعر جديد	پێشنیاری نرخێکی نوێ دەستپێبکە
+saved_offers	Saved offers	العروض المحفوظة	پێشنیارە پاشەکەوتکراوەکان
+product_catalog	Product catalog	كتالوج المنتجات	کاتەلۆگی بەرهەمەکان
+catalog_items	catalog items	منتج في الكتالوج	ماددەی کاتەلۆگ
+quick_preview	Quick preview	معاينة سريعة	پێشبینینی خێرا
+preview_current	Preview current draft	معاينة المسودة الحالية	پێشبینینی ڕەشنووسی ئێستا
+workflow	Workflow	سير العمل	ڕەوتی کار
+workflow_desc	Client → System → Items → Details → Preview → PDF	العميل ← المنظومة ← المواد ← التفاصيل ← المعاينة ← PDF	کڕیار ← سیستەم ← ماددەکان ← وردەکاری ← پێشبینین ← PDF
+workflow_note	A guided workflow keeps every quotation consistent and easy to review.	خطوات منظمة تجعل كل عرض سعر ثابتاً وسهل المراجعة.	ڕەوتێکی ڕێکخراو هەموو پێشنیارێک یەکسان و ئاسان بۆ پێداچوونەوە دەکات.
+brand_title	Offer Studio	استوديو العروض	ستودیۆی پێشنیار
+brand_sub	Professional solar quotations, built for field organizers.	عروض شمسية احترافية مصممة لمنظمي الكشف.	پێشنیاری خۆرەوی پیشەیی بۆ ڕێکخەرانی پشکنین.
+create_new_offer	Create new offer	إنشاء عرض جديد	پێشنیاری نوێ دروست بکە
+start_first	Start an offer first	ابدأ عرضاً أولاً	سەرەتا پێشنیارێک دەستپێبکە
+step_of	Step %d of 4	الخطوة %d من 4	هەنگاوی %d لە 4
+client	Client	العميل	کڕیار
+system	System	المنظومة	سیستەم
+items	Items	المواد	ماددەکان
+finish	Finish	النهاية	کۆتایی
+client_details	Client details	معلومات العميل	زانیاری کڕیار
+client_question	Who is this offer for?	لمن يتم إعداد هذا العرض؟	ئەم پێشنیارە بۆ کێیە؟
+client_name	Client name	اسم العميل	ناوی کڕیار
+client_hint	e.g. Ahmed Karim	مثال: أحمد كريم	نموونە: ئەحمەد کەریم
+phone	Phone	رقم الهاتف	ژمارەی تەلەفۆن
+phone_hint	07xx xxx xxxx	07xx xxx xxxx	07xx xxx xxxx
+location	Location	الموقع	شوێن
+location_hint	City / district / project location	المدينة / المنطقة / موقع المشروع	شار / ناوچە / شوێنی پڕۆژە
+date	Date	التاريخ	بەروار
+system_setup	System setup	معلومات المنظومة	ڕێکخستنی سیستەم
+system_desc	Define the solar system configuration.	حدد نوع وسعة المنظومة الشمسية.	جۆر و توانای سیستەمی خۆرەوی دیاری بکە.
+system_type	System type	نوع المنظومة	جۆری سیستەم
+hybrid	Hybrid	هجين	هایبرید
+on_grid	On-Grid	أون كريد	ئۆن‌گرید
+off_grid	Off-Grid	أوف كريد	ئۆف‌گرید
+required_capacity	Required capacity	السعة المطلوبة	توانای پێویست
+capacity_hint	e.g. 8 kW	مثال: 8 kW	نموونە: 8 kW
+phase	Phase	الطور	فاز
+single_phase	Single phase	أحادي	یەک فاز
+three_phase	Three phase	ثلاثي	سێ فاز
+tip	Tip	ملاحظة	تێبینی
+capacity_tip	Use the customer target capacity here; choose exact equipment sizes in the Items step.	استخدم السعة المطلوبة من العميل هنا، واختر قياسات الأجهزة الفعلية في خطوة المواد.	لێرە توانای داواکراوی کڕیار بنووسە؛ قەبارەی ڕاستەقینەی ئامێرەکان لە هەنگاوی ماددەکان هەڵبژێرە.
+offer_items	Offer items	مواد العرض	ماددەکانی پێشنیار
+items_desc	Search the full Solar App V4 catalog or add a custom item.	ابحث في كتالوج Solar App V4 الكامل أو أضف مادة مخصصة.	لە کاتەلۆگی تەواوی Solar App V4 بگەڕێ یان ماددەی تایبەت زیاد بکە.
+browse_catalog	Browse catalog	اختيار من الكتالوج	کاتەلۆگ ببینە
+custom_item	Custom item	مادة مخصصة	ماددەی تایبەت
+no_items	No items yet	لا توجد مواد بعد	هێشتا ماددە نییە
+no_items_desc	Add an inverter, panels, battery, accessories or any custom item.	أضف إنفرتر أو ألواحاً أو بطارية أو ملحقات أو أي مادة مخصصة.	ئینڤێرتەر، پانێڵ، باتری، پێداویستی یان هەر ماددەیەکی تایبەت زیاد بکە.
+final_details	Final details	معلومات إضافية	زانیاری کۆتایی
+final_desc	Add services, notes and site photos.	أضف التركيب والنقل والملاحظات وصور الموقع.	خزمەتگوزاری، تێبینی و وێنەکانی شوێن زیاد بکە.
+included_services	Included services	الخدمات المشمولة	خزمەتگوزارییە ناوخۆکراوەکان
+installation	Installation	التركيب	دامەزراندن
+transport	Transport	النقل	گواستنەوە
+inspection_organizer	Inspection organizer	منظم الكشف	ڕێکخەری پشکنین
+organizer_hint	Name of the organizer	اسم منظم الكشف	ناوی ڕێکخەری پشکنین
+notes	Notes	ملاحظات	تێبینی
+notes_hint	Installation conditions, cable route, roof notes…	شروط التركيب، مسار الكيبل، ملاحظات السطح…	مەرجی دامەزراندن، ڕێڕەوی کەیبڵ، تێبینی سەربان…
+site_photos	Site photos	صور الموقع / المنظومة	وێنەکانی شوێن / سیستەم
+add_photos	＋ Add photos	＋ إضافة صور	＋ وێنە زیاد بکە
+no_photos	No photos attached	لا توجد صور مرفقة	هیچ وێنەیەک هاوپێچ نەکراوە
+no_photos_desc	Attach roof, inverter area, distribution board or existing system photos.	أرفق صور السطح أو مكان الإنفرتر أو لوحة التوزيع أو المنظومة الحالية.	وێنەی سەربان، شوێنی ئینڤێرتەر، تابلۆی دابەشکردن یان سیستەمی ئێستا هاوپێچ بکە.
+cancel	Cancel	إلغاء	هەڵوەشاندنەوە
+back	Back	رجوع	گەڕانەوە
+continue	Continue	متابعة	بەردەوام بە
+preview_offer	Preview offer	معاينة العرض	پێشبینینی پێشنیار
+search_catalog	Search catalog	بحث في الكتالوج	لە کاتەلۆگ بگەڕێ
+search_hint	Search name, model, category or specification	ابحث بالاسم أو الموديل أو الفئة أو المواصفة	بە ناو، مۆدێل، پۆل یان تایبەتمەندی بگەڕێ
+all_categories	All categories	كل الفئات	هەموو پۆلەکان
+add_item	Add item	إضافة المادة	ماددە زیاد بکە
+edit_item	Edit item	تعديل المادة	دەستکاری ماددە
+add	Add	إضافة	زیادکردن
+save	Save	حفظ	پاشەکەوت
+category	Category	الفئة	پۆل
+item_model	Item / model	المادة / الموديل	ماددە / مۆدێل
+capacity_spec	Capacity / specification	السعة / المواصفة	توانا / تایبەتمەندی
+quantity	Quantity	الكمية	بڕ
+price_optional	Price (optional)	السعر (اختياري)	نرخ (ئارەزوومەندانە)
+qty	Qty	الكمية	بڕ
+price	Price	السعر	نرخ
+offer_preview	Offer Preview	معاينة العرض	پێشبینینی پێشنیار
+review_before	Review before saving or exporting	راجع قبل الحفظ أو التصدير	پێداچوونەوە پێش پاشەکەوتکردن یان دەرکردن
+save_offer	Save offer	حفظ العرض	پێشنیار پاشەکەوت بکە
+export_pdf	Export PDF	تصدير PDF	PDF دەربکە
+solar_system_offer	Solar System Offer	عرض منظومة شمسية	پێشنیاری سیستەمی خۆرەوی
+quotation_preview	Professional quotation preview	معاينة عرض سعر احترافية	پێشبینینی پیشەیی پێشنیار
+details	DETAILS	التفاصيل	وردەکاری
+included	Included	مشمول	ناوخۆکراوە
+not_included	Not included	غير مشمول	ناوخۆنەکراوە
+organizer	Organizer	منظم الكشف	ڕێکخەر
+photos	Photos	الصور	وێنەکان
+no_items_added	No items added	لا توجد مواد مضافة	هیچ ماددەیەک زیاد نەکراوە
+saved_title	Saved Offers	العروض المحفوظة	پێشنیارە پاشەکەوتکراوەکان
+saved_sub	Your quotation history	سجل عروض الأسعار	مێژووی پێشنیارەکانت
+no_saved	No saved offers	لا توجد عروض محفوظة	هیچ پێشنیارێکی پاشەکەوتکراو نییە
+no_saved_desc	Create your first offer from the New Offer tab.	أنشئ أول عرض من تبويب عرض جديد.	یەکەم پێشنیارت لە بەشی پێشنیاری نوێ دروست بکە.
+unnamed_client	Unnamed client	عميل بدون اسم	کڕیاری بێ ناو
+no_capacity	No capacity	بدون سعة	بێ توانا
+items_photos	%d items · %d photos	%d مادة · %d صورة	%d ماددە · %d وێنە
+open	Open	فتح	کردنەوە
+edit	Edit	تعديل	دەستکاری
+delete	Delete	حذف	سڕینەوە
+offer_saved	Offer saved	تم حفظ العرض	پێشنیار پاشەکەوت کرا
+catalog_title	Product Catalog	كتالوج المنتجات	کاتەلۆگی بەرهەمەکان
+catalog_sub	%d ready-to-use items	%d مادة جاهزة للاستخدام	%d ماددەی ئامادە بۆ بەکارهێنان
+product_details	Product details	تفاصيل المنتج	وردەکاری بەرهەم
+add_current	Add to current offer	إضافة إلى العرض الحالي	زیادکردن بۆ پێشنیاری ئێستا
+settings_title	Settings	الإعدادات	ڕێکخستنەکان
+settings_sub	Language, defaults and quotation preferences	اللغة والإعدادات الافتراضية وتفضيلات العرض	زمان، بنەڕەتەکان و هەڵبژاردەکانی پێشنیار
+app_language	App language	لغة التطبيق	زمانی ئەپ
+default_currency	Default currency	العملة الافتراضية	دراوی بنەڕەتی
+default_organizer	Default organizer	منظم الكشف الافتراضي	ڕێکخەری بنەڕەتی
+defaults	Offer defaults	إعدادات العرض الافتراضية	بنەڕەتەکانی پێشنیار
+include_install_default	Include installation by default	شمول التركيب افتراضياً	دامەزراندن بە بنەڕەتی ناوخۆ بێت
+include_transport_default	Include transport by default	شمول النقل افتراضياً	گواستنەوە بە بنەڕەتی ناوخۆ بێت
+show_prices	Show prices in preview and PDF	إظهار الأسعار في المعاينة وPDF	نرخەکان لە پێشبینین و PDF پیشان بدە
+catalog_size	Solar App V4 catalog	كتالوج Solar App V4	کاتەلۆگی Solar App V4
+products_loaded	%d products loaded	تم تحميل %d منتج	%d بەرهەم بارکراوە
+save_settings	Save settings	حفظ الإعدادات	ڕێکخستنەکان پاشەکەوت بکە
+settings_saved	Settings saved	تم حفظ الإعدادات	ڕێکخستنەکان پاشەکەوت کران
+english	English	English	English
+arabic	Arabic	العربية	عەرەبی
+kurdish	Kurdish	الكردية	کوردی
+currency	Currency	العملة	دراو
+on	ON	نعم	بەڵێ
+off	OFF	لا	نەخێر
+pdf_error	PDF error: %s	خطأ في PDF: %s	هەڵەی PDF: %s
+share_offer	Share offer	مشاركة العرض	هاوبەشکردنی پێشنیار
+site_photo	Site Photo %d	صورة الموقع %d	وێنەی شوێن %d
+generated_by	Infinity Green Power · Generated by Offer Studio	Infinity Green Power · تم إنشاؤه بواسطة Offer Studio	Infinity Green Power · دروستکراوە بە Offer Studio
+custom	Custom	مخصص	تایبەت
+custom_item_name	Custom item	مادة مخصصة	ماددەی تایبەت
+saved_badge	Saved	محفوظ	پاشەکەوتکراو
+catalog_count_home	%d products	%d منتج	%d بەرهەم
+language_change_note	The interface updates immediately after saving settings.	تتغير واجهة التطبيق مباشرة بعد حفظ الإعدادات.	دوای پاشەکەوتکردنی ڕێکخستنەکان ڕووکار دەستبەجێ نوێ دەبێتەوە.
+settings_desc	Configure language, currency and offer defaults.	اضبط اللغة والعملة والإعدادات الافتراضية للعروض.	زمان، دراو و ڕێکخستنە بنەڕەتییەکانی پێشنیار ڕێکبخە.
+default_organizer2	Default inspection organizer	منظم الكشف الافتراضي	ڕێکخەری پشکنینی بنەڕەتی
+organizer_name	Organizer name	اسم المنظم	ناوی ڕێکخەر
+catalog_included	Solar App V4 catalog items included	مادة من كتالوج Solar App V4 مضافة	ماددەی کاتەلۆگی Solar App V4 ناوخۆکراوە
+details2	Details	التفاصيل	وردەکاری
+generated_v41	Generated by IGP Offer Studio	تم الإنشاء بواسطة IGP Offer Studio	دروستکراوە بە IGP Offer Studio
