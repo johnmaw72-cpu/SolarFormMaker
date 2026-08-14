@@ -14,21 +14,27 @@ jobs:
         with:
           ref: 53d9482a665067a0bc64027b78dc34e9abfa86a0
 
-      - name: Apply v4.8.1 stability patch
+      - name: Apply v4.8.2 stability and UI patch
         run: |
           curl -fsSL https://raw.githubusercontent.com/johnmaw72-cpu/SolarFormMaker/main/app/src/main/java/com/infinitygreenpower/solarform/OfferStudioV481Activity.java \
             -o app/src/main/java/com/infinitygreenpower/solarform/OfferStudioV481Activity.java
+          curl -fsSL https://raw.githubusercontent.com/johnmaw72-cpu/SolarFormMaker/main/app/src/main/java/com/infinitygreenpower/solarform/OfferStudioV482Activity.java \
+            -o app/src/main/java/com/infinitygreenpower/solarform/OfferStudioV482Activity.java
+          curl -fsSL https://raw.githubusercontent.com/johnmaw72-cpu/SolarFormMaker/main/app/src/main/assets/igp_app_icon_256.b64 \
+            -o /tmp/igp_app_icon_256.b64
+          base64 -d /tmp/igp_app_icon_256.b64 > app/src/main/res/drawable/ic_igp_organizer.png
           python3 - <<'PY'
           from pathlib import Path
+          import re
           p=Path('app/src/main/AndroidManifest.xml')
           s=p.read_text()
-          s=s.replace('.OfferStudioV480Activity','.OfferStudioV481Activity')
+          s=s.replace('.OfferStudioV480Activity','.OfferStudioV482Activity')
+          s=s.replace('@drawable/ic_offer_studio','@drawable/ic_igp_organizer')
           p.write_text(s)
           p=Path('app/build.gradle')
           s=p.read_text()
-          import re
-          s=re.sub(r'versionCode\s+\d+', 'versionCode 31', s)
-          s=re.sub(r"versionName\s+['\"][^'\"]+['\"]", "versionName '4.8.1'", s)
+          s=re.sub(r'versionCode\s+\d+', 'versionCode 32', s)
+          s=re.sub(r"versionName\s+['\"][^'\"]+['\"]", "versionName '4.8.2'", s)
           p.write_text(s)
           PY
 
@@ -50,12 +56,12 @@ jobs:
         run: gradle --no-daemon clean assembleDebug
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk IGP-Organizer-Form-v4.8.1.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk IGP-Organizer-Form-v4.8.2.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: IGP-Organizer-Form-v4.8.1-APK
-          path: IGP-Organizer-Form-v4.8.1.apk
+          name: IGP-Organizer-Form-v4.8.2-APK
+          path: IGP-Organizer-Form-v4.8.2.apk
           if-no-files-found: error
           retention-days: 30
