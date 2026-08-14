@@ -13,15 +13,17 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: 53d9482a665067a0bc64027b78dc34e9abfa86a0
+          fetch-depth: 1
 
       - name: Apply v4.8.2 stability and UI patch
         run: |
-          curl -fsSL https://raw.githubusercontent.com/johnmaw72-cpu/SolarFormMaker/main/app/src/main/java/com/infinitygreenpower/solarform/OfferStudioV481Activity.java \
-            -o app/src/main/java/com/infinitygreenpower/solarform/OfferStudioV481Activity.java
-          curl -fsSL https://raw.githubusercontent.com/johnmaw72-cpu/SolarFormMaker/main/app/src/main/java/com/infinitygreenpower/solarform/OfferStudioV482Activity.java \
-            -o app/src/main/java/com/infinitygreenpower/solarform/OfferStudioV482Activity.java
-          curl -fsSL https://raw.githubusercontent.com/johnmaw72-cpu/SolarFormMaker/main/app/src/main/assets/igp_app_icon_256.b64 \
-            -o /tmp/igp_app_icon_256.b64
+          git fetch --depth=1 origin "$GITHUB_SHA"
+          git show "$GITHUB_SHA":app/src/main/java/com/infinitygreenpower/solarform/OfferStudioV481Activity.java \
+            > app/src/main/java/com/infinitygreenpower/solarform/OfferStudioV481Activity.java
+          git show "$GITHUB_SHA":app/src/main/java/com/infinitygreenpower/solarform/OfferStudioV482Activity.java \
+            > app/src/main/java/com/infinitygreenpower/solarform/OfferStudioV482Activity.java
+          git show "$GITHUB_SHA":app/src/main/assets/igp_app_icon_256.b64 \
+            > /tmp/igp_app_icon_256.b64
           base64 -d /tmp/igp_app_icon_256.b64 > app/src/main/res/drawable/ic_igp_organizer.png
           python3 - <<'PY'
           from pathlib import Path
