@@ -9,8 +9,28 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout exact stable v4.8.0 source
         uses: actions/checkout@v4
+        with:
+          ref: 53d9482a665067a0bc64027b78dc34e9abfa86a0
+
+      - name: Apply v4.8.1 stability patch
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/johnmaw72-cpu/SolarFormMaker/main/app/src/main/java/com/infinitygreenpower/solarform/OfferStudioV481Activity.java \
+            -o app/src/main/java/com/infinitygreenpower/solarform/OfferStudioV481Activity.java
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/AndroidManifest.xml')
+          s=p.read_text()
+          s=s.replace('.OfferStudioV480Activity','.OfferStudioV481Activity')
+          p.write_text(s)
+          p=Path('app/build.gradle')
+          s=p.read_text()
+          import re
+          s=re.sub(r'versionCode\s+\d+', 'versionCode 31', s)
+          s=re.sub(r"versionName\s+['\"][^'\"]+['\"]", "versionName '4.8.1'", s)
+          p.write_text(s)
+          PY
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
