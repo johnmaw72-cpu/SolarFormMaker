@@ -24,10 +24,15 @@ android {
     sourceSets {
         main {
             java {
-                exclude '**/OfferStudioV490Activity.java'
-                exclude '**/OfferStudioV500Activity.java'
-                exclude '**/OfferStudioV510Activity.java'
-                exclude '**/OrganizerRebuild*.java'
+                include '**/OfferStudioActivity.java'
+                include '**/OfferStudioFixedActivity.java'
+                include '**/OfferStudioV41CompatActivity.java'
+                include '**/OfferStudioV440Activity.java'
+                include '**/OfferStudioV450Activity.java'
+                include '**/OfferStudioV470Activity.java'
+                include '**/OfferStudioV480Activity.java'
+                include '**/OfferStudioV481Activity.java'
+                include '**/SimpleFileProvider.java'
             }
         }
     }
