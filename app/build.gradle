@@ -21,6 +21,17 @@ android {
         versionName '4.8.1'
     }
 
+    sourceSets {
+        main {
+            java {
+                exclude '**/OfferStudioV490Activity.java'
+                exclude '**/OfferStudioV500Activity.java'
+                exclude '**/OfferStudioV510Activity.java'
+                exclude '**/OrganizerRebuild*.java'
+            }
+        }
+    }
+
     buildTypes {
         debug {
             signingConfig signingConfigs.stableDebug
