@@ -51,11 +51,38 @@ jobs:
           gradle-version: '9.4.1'
 
       - name: Build debug APK
+        id: build
         working-directory: /tmp/igp-build/IGP
         shell: bash
-        run: gradle --no-daemon clean assembleDebug
+        continue-on-error: true
+        run: |
+          set +e
+          gradle --no-daemon clean assembleDebug > /tmp/igp-build.log 2>&1
+          STATUS=$?
+          grep -E "(^e:| error:|FAILURE:|What went wrong|PdfExporter\.kt)" /tmp/igp-build.log | tail -n 120 > /tmp/igp-errors.txt || true
+          cat /tmp/igp-errors.txt
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          exit $STATUS
+
+      - name: Publish diagnostics if build failed
+        if: steps.build.outcome == 'failure'
+        shell: bash
+        run: |
+          mkdir -p build-output
+          cp /tmp/igp-errors.txt build-output/v5-build-errors.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add build-output/v5-build-errors.txt
+          git commit -m "Record v5 PDF-fix build diagnostics" || true
+          git push || true
+
+      - name: Stop on build failure
+        if: steps.build.outcome == 'failure'
+        shell: bash
+        run: exit 1
 
       - name: Verify and rename APK
+        if: steps.build.outcome == 'success'
         shell: bash
         run: |
           APK=/tmp/igp-build/IGP/app/build/outputs/apk/debug/app-debug.apk
@@ -64,6 +91,7 @@ jobs:
           sha256sum IGP-Organizer-Form-5.0.0-rc1-PDF-fix-test.apk
 
       - name: Upload APK artifact
+        if: steps.build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: IGP-Organizer-Form-5.0.0-rc1-PDF-fix-test-APK
@@ -72,12 +100,14 @@ jobs:
           retention-days: 7
 
       - name: Publish APK to build branch
+        if: steps.build.outcome == 'success'
         shell: bash
         run: |
           mkdir -p build-output
           cp IGP-Organizer-Form-5.0.0-rc1-PDF-fix-test.apk build-output/
+          rm -f build-output/v5-build-errors.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add build-output/IGP-Organizer-Form-5.0.0-rc1-PDF-fix-test.apk
+          git add build-output
           git commit -m "Build v5 PDF-fix test APK" || exit 0
           git push
