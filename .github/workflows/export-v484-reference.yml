@@ -57,14 +57,13 @@ jobs:
 
       - name: Archive clean reference source
         run: |
-          cd ..
-          zip -qr IGP-Organizer-Form-v4.8.4-Clean-Reference-Source.zip SolarFormMaker \
-            -x 'SolarFormMaker/.gradle/*' 'SolarFormMaker/app/build/*' 'SolarFormMaker/build/*'
+          zip -qr IGP-Organizer-Form-v4.8.4-Clean-Reference-Source.zip . \
+            -x 'IGP-Organizer-Form-v4.8.4-Clean-Reference-Source.zip' '.gradle/*' 'app/build/*' 'build/*'
 
       - name: Upload reference source artifact
         uses: actions/upload-artifact@v4
         with:
           name: IGP-Organizer-Form-v4.8.4-Clean-Reference-Source
-          path: ../IGP-Organizer-Form-v4.8.4-Clean-Reference-Source.zip
+          path: IGP-Organizer-Form-v4.8.4-Clean-Reference-Source.zip
           if-no-files-found: error
           retention-days: 30
