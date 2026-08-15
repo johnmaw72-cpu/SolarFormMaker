@@ -59,7 +59,7 @@ jobs:
           set +e
           gradle --no-daemon clean assembleDebug > /tmp/igp-build.log 2>&1
           STATUS=$?
-          grep -E "(^e:| error:|FAILURE:|What went wrong|PdfExporter\.kt)" /tmp/igp-build.log | tail -n 120 > /tmp/igp-errors.txt || true
+          tail -n 240 /tmp/igp-build.log > /tmp/igp-errors.txt
           cat /tmp/igp-errors.txt
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
           exit $STATUS
@@ -73,7 +73,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add build-output/v5-build-errors.txt
-          git commit -m "Record v5 PDF-fix build diagnostics" || true
+          git commit -m "Record detailed v5 PDF-fix build diagnostics" || true
           git push || true
 
       - name: Stop on build failure
