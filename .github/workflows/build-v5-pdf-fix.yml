@@ -42,16 +42,22 @@ jobs:
 
           BUILD=/tmp/igp-build/IGP/app/build.gradle.kts
           PDF="$SRC/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt"
+          STRINGS="$SRC/main/res/values/strings.xml"
           test -f "$BUILD"
           test -f "$SRC/main/AndroidManifest.xml"
           test -f "$PDF"
+          test -f "$STRINGS"
 
-          # Make this a real new test version so Android/About clearly distinguishes it.
+          # Real rc2 version plus a unique debug package so it can install beside older test builds
+          # even when the CI debug signing key differs.
           sed -i 's/versionCode = 35/versionCode = 36/' "$BUILD"
           sed -i 's/versionName = "5.0.0-rc1"/versionName = "5.0.0-rc2"/' "$BUILD"
-          grep -nE 'versionCode|versionName|versionNameSuffix' "$BUILD"
+          sed -i 's/applicationIdSuffix = ".rebuild"/applicationIdSuffix = ".rc2test"/' "$BUILD"
+          sed -i 's#<string name="app_name">IGP Organizer Form</string>#<string name="app_name">IGP Organizer Form RC2</string>#' "$STRINGS"
+          grep -nE 'applicationId|applicationIdSuffix|versionCode|versionName|versionNameSuffix' "$BUILD"
+          grep -n 'app_name' "$STRINGS"
 
-          # Fail the build if the verified PDF-fixed exporter is not the source being compiled.
+          # Fail if the verified PDF-fixed exporter is not the source being compiled.
           PDF_SHA=$(sha256sum "$PDF" | awk '{print $1}')
           echo "PdfExporter SHA-256: $PDF_SHA"
           test "$PDF_SHA" = "54fe417288001ae1349540eee7f63705ca119ac2b215138507cb0f814247d864"
@@ -87,14 +93,19 @@ jobs:
         run: |
           APK=/tmp/igp-build/IGP/app/build/outputs/apk/debug/app-debug.apk
           test -s "$APK"
-          cp "$APK" IGP-Organizer-Form-5.0.0-rc2-PDF-fix-test.apk
-          sha256sum IGP-Organizer-Form-5.0.0-rc2-PDF-fix-test.apk
+          BADGING=$(aapt dump badging "$APK" | head -n 1)
+          echo "$BADGING"
+          echo "$BADGING" | grep "name='com.infinitygreenpower.offerstudio.rc2test'"
+          echo "$BADGING" | grep "versionCode='36'"
+          echo "$BADGING" | grep "versionName='5.0.0-rc2-test'"
+          cp "$APK" IGP-Organizer-Form-5.0.0-rc2-PDF-fix-conflict-free.apk
+          sha256sum IGP-Organizer-Form-5.0.0-rc2-PDF-fix-conflict-free.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: IGP-Organizer-Form-5.0.0-rc2-PDF-fix-test-APK
-          path: IGP-Organizer-Form-5.0.0-rc2-PDF-fix-test.apk
+          name: IGP-Organizer-Form-5.0.0-rc2-PDF-fix-conflict-free-APK
+          path: IGP-Organizer-Form-5.0.0-rc2-PDF-fix-conflict-free.apk
           if-no-files-found: error
           retention-days: 7
 
@@ -102,10 +113,9 @@ jobs:
         shell: bash
         run: |
           mkdir -p build-output
-          cp IGP-Organizer-Form-5.0.0-rc2-PDF-fix-test.apk build-output/
-          rm -f build-output/v5-build-errors.txt
+          cp IGP-Organizer-Form-5.0.0-rc2-PDF-fix-conflict-free.apk build-output/
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add build-output
-          git commit -m "Build v5.0.0-rc2 PDF-fix test APK" || exit 0
+          git add build-output/IGP-Organizer-Form-5.0.0-rc2-PDF-fix-conflict-free.apk
+          git commit -m "Build conflict-free v5.0.0-rc2 test APK" || exit 0
           git push
