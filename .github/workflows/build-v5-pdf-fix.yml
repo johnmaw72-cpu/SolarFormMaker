@@ -20,15 +20,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Reconstruct v5 PDF-fixed source
+      - name: Reconstruct and verify rc2 PDF-fixed source
         shell: bash
         run: |
           cat build-input/v5_pdf_fix/source.b64.part* | base64 -d > /tmp/igp-source.zip
           mkdir -p /tmp/igp-build
           unzip -q /tmp/igp-source.zip -d /tmp/igp-build || true
 
-          # The compact build bundle stores the Android main source-set directly under app/src.
-          # Restore the canonical app/src/main layout before invoking AGP.
           SRC=/tmp/igp-build/IGP/app/src
           mkdir -p "$SRC/main"
           for DIR in java res assets; do
@@ -40,12 +38,24 @@ jobs:
             cp "$SRC/AndroidManifest.xml" "$SRC/main/AndroidManifest.xml"
           fi
 
-          # Repair the single file that was affected by transfer CRC corruption.
           cp build-input/v5_pdf_fix/Relations.kt "$SRC/main/java/com/infinitygreenpower/organizerform/data/db/Relations.kt"
 
-          test -f /tmp/igp-build/IGP/app/build.gradle.kts
+          BUILD=/tmp/igp-build/IGP/app/build.gradle.kts
+          PDF="$SRC/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt"
+          test -f "$BUILD"
           test -f "$SRC/main/AndroidManifest.xml"
-          test -f "$SRC/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt"
+          test -f "$PDF"
+
+          # Make this a real new test version so Android/About clearly distinguishes it.
+          sed -i 's/versionCode = 35/versionCode = 36/' "$BUILD"
+          sed -i 's/versionName = "5.0.0-rc1"/versionName = "5.0.0-rc2"/' "$BUILD"
+          grep -nE 'versionCode|versionName|versionNameSuffix' "$BUILD"
+
+          # Fail the build if the verified PDF-fixed exporter is not the source being compiled.
+          PDF_SHA=$(sha256sum "$PDF" | awk '{print $1}')
+          echo "PdfExporter SHA-256: $PDF_SHA"
+          test "$PDF_SHA" = "54fe417288001ae1349540eee7f63705ca119ac2b215138507cb0f814247d864"
+          test "$(wc -l < "$PDF")" -ge 600
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -68,63 +78,34 @@ jobs:
           gradle-version: '9.4.1'
 
       - name: Build debug APK
-        id: build
         working-directory: /tmp/igp-build/IGP
         shell: bash
-        continue-on-error: true
-        run: |
-          set +e
-          gradle --no-daemon clean assembleDebug > /tmp/igp-build.log 2>&1
-          STATUS=$?
-          tail -n 240 /tmp/igp-build.log > /tmp/igp-errors.txt
-          cat /tmp/igp-errors.txt
-          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
-          exit $STATUS
-
-      - name: Publish diagnostics if build failed
-        if: steps.build.outcome == 'failure'
-        shell: bash
-        run: |
-          mkdir -p build-output
-          cp /tmp/igp-errors.txt build-output/v5-build-errors.txt
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add build-output/v5-build-errors.txt
-          git commit -m "Record detailed v5 PDF-fix build diagnostics" || true
-          git push || true
-
-      - name: Stop on build failure
-        if: steps.build.outcome == 'failure'
-        shell: bash
-        run: exit 1
+        run: gradle --no-daemon clean assembleDebug
 
       - name: Verify and rename APK
-        if: steps.build.outcome == 'success'
         shell: bash
         run: |
           APK=/tmp/igp-build/IGP/app/build/outputs/apk/debug/app-debug.apk
           test -s "$APK"
-          cp "$APK" IGP-Organizer-Form-5.0.0-rc1-PDF-fix-test.apk
-          sha256sum IGP-Organizer-Form-5.0.0-rc1-PDF-fix-test.apk
+          cp "$APK" IGP-Organizer-Form-5.0.0-rc2-PDF-fix-test.apk
+          sha256sum IGP-Organizer-Form-5.0.0-rc2-PDF-fix-test.apk
 
       - name: Upload APK artifact
-        if: steps.build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: IGP-Organizer-Form-5.0.0-rc1-PDF-fix-test-APK
-          path: IGP-Organizer-Form-5.0.0-rc1-PDF-fix-test.apk
+          name: IGP-Organizer-Form-5.0.0-rc2-PDF-fix-test-APK
+          path: IGP-Organizer-Form-5.0.0-rc2-PDF-fix-test.apk
           if-no-files-found: error
           retention-days: 7
 
       - name: Publish APK to build branch
-        if: steps.build.outcome == 'success'
         shell: bash
         run: |
           mkdir -p build-output
-          cp IGP-Organizer-Form-5.0.0-rc1-PDF-fix-test.apk build-output/
+          cp IGP-Organizer-Form-5.0.0-rc2-PDF-fix-test.apk build-output/
           rm -f build-output/v5-build-errors.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add build-output
-          git commit -m "Build v5 PDF-fix test APK" || exit 0
+          git commit -m "Build v5.0.0-rc2 PDF-fix test APK" || exit 0
           git push
