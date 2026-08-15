@@ -48,8 +48,6 @@ jobs:
           test -f "$PDF"
           test -f "$STRINGS"
 
-          # Real rc2 version plus a unique debug package so it can install beside older test builds
-          # even when the CI debug signing key differs.
           sed -i 's/versionCode = 35/versionCode = 36/' "$BUILD"
           sed -i 's/versionName = "5.0.0-rc1"/versionName = "5.0.0-rc2"/' "$BUILD"
           sed -i 's/applicationIdSuffix = ".rebuild"/applicationIdSuffix = ".rc2test"/' "$BUILD"
@@ -57,7 +55,6 @@ jobs:
           grep -nE 'applicationId|applicationIdSuffix|versionCode|versionName|versionNameSuffix' "$BUILD"
           grep -n 'app_name' "$STRINGS"
 
-          # Fail if the verified PDF-fixed exporter is not the source being compiled.
           PDF_SHA=$(sha256sum "$PDF" | awk '{print $1}')
           echo "PdfExporter SHA-256: $PDF_SHA"
           test "$PDF_SHA" = "54fe417288001ae1349540eee7f63705ca119ac2b215138507cb0f814247d864"
@@ -92,8 +89,10 @@ jobs:
         shell: bash
         run: |
           APK=/tmp/igp-build/IGP/app/build/outputs/apk/debug/app-debug.apk
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
           test -s "$APK"
-          BADGING=$(aapt dump badging "$APK" | head -n 1)
+          test -x "$AAPT"
+          BADGING=$("$AAPT" dump badging "$APK" | head -n 1)
           echo "$BADGING"
           echo "$BADGING" | grep "name='com.infinitygreenpower.offerstudio.rc2test'"
           echo "$BADGING" | grep "versionCode='36'"
