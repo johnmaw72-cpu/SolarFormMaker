@@ -1,0 +1,70 @@
+name: Export v4.8.4 Reference Source
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/export-v484-reference.yml'
+      - 'app/src/main/java/com/infinitygreenpower/solarform/OfferStudioV484Activity.java'
+      - 'app/src/main/res/drawable/ic_igp_organizer_v482.xml'
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact stable v4.8.0 source
+        uses: actions/checkout@v4
+        with:
+          ref: 53d9482a665067a0bc64027b78dc34e9abfa86a0
+          fetch-depth: 1
+
+      - name: Apply v4.8.4 reference patch
+        run: |
+          git fetch --depth=1 origin "$GITHUB_SHA"
+          git show "$GITHUB_SHA":app/src/main/java/com/infinitygreenpower/solarform/OfferStudioV484Activity.java \
+            > app/src/main/java/com/infinitygreenpower/solarform/OfferStudioV484Activity.java
+          git show "$GITHUB_SHA":app/src/main/res/drawable/ic_igp_organizer_v482.xml \
+            > app/src/main/res/drawable/ic_igp_organizer_v482.xml
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('app/src/main/AndroidManifest.xml')
+          s=p.read_text()
+          s=s.replace('.OfferStudioV480Activity','.OfferStudioV484Activity')
+          s=s.replace('@drawable/ic_offer_studio','@drawable/ic_igp_organizer_v482')
+          p.write_text(s)
+          p=Path('app/build.gradle')
+          s=p.read_text()
+          s=re.sub(r'versionCode\s+\d+', 'versionCode 34', s)
+          s=re.sub(r"versionName\s+['\"][^'\"]+['\"]", "versionName '4.8.4'", s)
+          p.write_text(s)
+          PY
+
+      - name: Sanitize reference source
+        run: |
+          rm -rf .git
+          rm -f signing/solarform-debug.keystore signing/solarform-debug.keystore.b64
+          cat > SIGNING_NOT_INCLUDED.md <<'EOF'
+          # Signing key intentionally not included
+
+          This reference source is for a clean Codex rebuild.
+          Do not hard-code signing credentials into the new project.
+          During development use a normal local debug key.
+          Before an in-place production upgrade, restore the existing application's original signing identity through a secure local/CI secret.
+          Existing Android applicationId reference: com.infinitygreenpower.offerstudio
+          EOF
+
+      - name: Archive clean reference source
+        run: |
+          cd ..
+          zip -qr IGP-Organizer-Form-v4.8.4-Clean-Reference-Source.zip SolarFormMaker \
+            -x 'SolarFormMaker/.gradle/*' 'SolarFormMaker/app/build/*' 'SolarFormMaker/build/*'
+
+      - name: Upload reference source artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: IGP-Organizer-Form-v4.8.4-Clean-Reference-Source
+          path: ../IGP-Organizer-Form-v4.8.4-Clean-Reference-Source.zip
+          if-no-files-found: error
+          retention-days: 30
