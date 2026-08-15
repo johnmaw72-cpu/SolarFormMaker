@@ -1,4 +1,4 @@
-name: Build v5 PDF Fix APK
+name: Build IGP RC3 Language Fix APK
 
 on:
   push:
@@ -15,50 +15,43 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Reconstruct and verify rc2 PDF-fixed source
+      - name: Reconstruct RC3 language-fixed source
         shell: bash
         run: |
           cat build-input/v5_pdf_fix/source.b64.part* | base64 -d > /tmp/igp-source.zip
           mkdir -p /tmp/igp-build
           unzip -q /tmp/igp-source.zip -d /tmp/igp-build || true
-
           SRC=/tmp/igp-build/IGP/app/src
           mkdir -p "$SRC/main"
           for DIR in java res assets; do
-            if [ -d "$SRC/$DIR" ]; then
-              cp -a "$SRC/$DIR" "$SRC/main/"
-            fi
+            if [ -d "$SRC/$DIR" ]; then cp -a "$SRC/$DIR" "$SRC/main/"; fi
           done
-          if [ -f "$SRC/AndroidManifest.xml" ]; then
-            cp "$SRC/AndroidManifest.xml" "$SRC/main/AndroidManifest.xml"
-          fi
-
+          if [ -f "$SRC/AndroidManifest.xml" ]; then cp "$SRC/AndroidManifest.xml" "$SRC/main/AndroidManifest.xml"; fi
           cp build-input/v5_pdf_fix/Relations.kt "$SRC/main/java/com/infinitygreenpower/organizerform/data/db/Relations.kt"
 
-          BUILD=/tmp/igp-build/IGP/app/build.gradle.kts
+          cat build-input/v5_language_fix/overlay.b64.part* | base64 -d > /tmp/overlay.tar.gz
+          test "$(sha256sum /tmp/overlay.tar.gz | awk '{print $1}')" = "34e246853dc4d297e6f1c4ee3c4f8446ee16966f5188105b856ed1cb0af5711e"
+          tar -xzf /tmp/overlay.tar.gz -C /tmp/igp-build/IGP
+
+          sed -i 's#<string name="app_name">IGP Organizer Form</string>#<string name="app_name">IGP Organizer Form Preview</string>#' "$SRC/main/res/values/strings.xml"
+          sed -i 's#<string name="app_name">استمارة منظم IGP</string>#<string name="app_name">استمارة منظم IGP - تجريبي</string>#' "$SRC/main/res/values-ar/strings.xml"
+          sed -i 's#<string name="app_name">فۆرمی ڕێکخەری IGP</string>#<string name="app_name">فۆرمی ڕێکخەری IGP - تاقیکردنەوە</string>#' "$SRC/main/res/values-b+ckb/strings.xml"
+
+          cat build-input/v5_language_fix/preview-test-keystore.b64 | base64 -d > /tmp/igp-preview-test.jks
+
           PDF="$SRC/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt"
-          STRINGS="$SRC/main/res/values/strings.xml"
-          test -f "$BUILD"
-          test -f "$SRC/main/AndroidManifest.xml"
-          test -f "$PDF"
-          test -f "$STRINGS"
-
-          sed -i 's/versionCode = 35/versionCode = 36/' "$BUILD"
-          sed -i 's/versionName = "5.0.0-rc1"/versionName = "5.0.0-rc2"/' "$BUILD"
-          sed -i 's/applicationIdSuffix = ".rebuild"/applicationIdSuffix = ".rc2test"/' "$BUILD"
-          sed -i 's#<string name="app_name">IGP Organizer Form</string>#<string name="app_name">IGP Organizer Form RC2</string>#' "$STRINGS"
-          grep -nE 'applicationId|applicationIdSuffix|versionCode|versionName|versionNameSuffix' "$BUILD"
-          grep -n 'app_name' "$STRINGS"
-
-          PDF_SHA=$(sha256sum "$PDF" | awk '{print $1}')
-          echo "PdfExporter SHA-256: $PDF_SHA"
-          test "$PDF_SHA" = "54fe417288001ae1349540eee7f63705ca119ac2b215138507cb0f814247d864"
-          test "$(wc -l < "$PDF")" -ge 600
+          MAIN="$SRC/main/java/com/infinitygreenpower/organizerform/MainActivity.kt"
+          SETTINGS="$SRC/main/java/com/infinitygreenpower/organizerform/feature/settings/SettingsScreen.kt"
+          FORM="$SRC/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt"
+          test "$(sha256sum "$PDF" | awk '{print $1}')" = "d29e568f5adafe9f7d1efca82ffb39560d6370974d66d1e791ea75a83533d2c9"
+          test "$(sha256sum "$MAIN" | awk '{print $1}')" = "9a785b19eb4fa23321f8364457defd7708f969c52325839057cb435131b551a6"
+          test "$(sha256sum "$SETTINGS" | awk '{print $1}')" = "d1fb3b6b735f83fc3bca4bf063e4578a130bc7431dadb806f62b24922e7f5b6b"
+          test "$(sha256sum "$FORM" | awk '{print $1}')" = "372b1b888be673f3fc132ae6faff66ea10e039e945d18e57caa0955d153e0e52"
+          grep -nE 'applicationId|applicationIdSuffix|versionCode|versionName|versionNameSuffix' /tmp/igp-build/IGP/app/build.gradle.kts
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -80,9 +73,14 @@ jobs:
         with:
           gradle-version: '9.4.1'
 
-      - name: Build debug APK
+      - name: Build RC3 preview APK
         working-directory: /tmp/igp-build/IGP
         shell: bash
+        env:
+          IGP_PREVIEW_KEYSTORE: /tmp/igp-preview-test.jks
+          IGP_PREVIEW_STORE_PASSWORD: IGPPreview2026!
+          IGP_PREVIEW_KEY_ALIAS: igp-preview
+          IGP_PREVIEW_KEY_PASSWORD: IGPPreview2026!
         run: gradle --no-daemon clean assembleDebug
 
       - name: Verify and rename APK
@@ -90,21 +88,23 @@ jobs:
         run: |
           APK=/tmp/igp-build/IGP/app/build/outputs/apk/debug/app-debug.apk
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
-          test -s "$APK"
-          test -x "$AAPT"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          test -s "$APK" && test -x "$AAPT" && test -x "$APKSIGNER"
           BADGING=$("$AAPT" dump badging "$APK" | head -n 1)
           echo "$BADGING"
-          echo "$BADGING" | grep "name='com.infinitygreenpower.offerstudio.rc2test'"
-          echo "$BADGING" | grep "versionCode='36'"
-          echo "$BADGING" | grep "versionName='5.0.0-rc2-test'"
-          cp "$APK" IGP-Organizer-Form-5.0.0-rc2-PDF-fix-conflict-free.apk
-          sha256sum IGP-Organizer-Form-5.0.0-rc2-PDF-fix-conflict-free.apk
+          echo "$BADGING" | grep "name='com.infinitygreenpower.offerstudio.preview'"
+          echo "$BADGING" | grep "versionCode='37'"
+          echo "$BADGING" | grep "versionName='5.0.0-rc3-test'"
+          "$APKSIGNER" verify --print-certs "$APK" | tee /tmp/signing.txt
+          grep -qi '1f83a683d692d6530df5ba8e4ba1892e18bb11a313c5f744b464f3bf003c06f0' /tmp/signing.txt
+          cp "$APK" IGP-Organizer-Form-5.0.0-rc3-Language-PDF-Fix-Preview.apk
+          sha256sum IGP-Organizer-Form-5.0.0-rc3-Language-PDF-Fix-Preview.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: IGP-Organizer-Form-5.0.0-rc2-PDF-fix-conflict-free-APK
-          path: IGP-Organizer-Form-5.0.0-rc2-PDF-fix-conflict-free.apk
+          name: IGP-Organizer-Form-5.0.0-rc3-Language-PDF-Fix-Preview-APK
+          path: IGP-Organizer-Form-5.0.0-rc3-Language-PDF-Fix-Preview.apk
           if-no-files-found: error
           retention-days: 7
 
@@ -112,9 +112,9 @@ jobs:
         shell: bash
         run: |
           mkdir -p build-output
-          cp IGP-Organizer-Form-5.0.0-rc2-PDF-fix-conflict-free.apk build-output/
+          cp IGP-Organizer-Form-5.0.0-rc3-Language-PDF-Fix-Preview.apk build-output/
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add build-output/IGP-Organizer-Form-5.0.0-rc2-PDF-fix-conflict-free.apk
-          git commit -m "Build conflict-free v5.0.0-rc2 test APK" || exit 0
+          git add build-output/IGP-Organizer-Form-5.0.0-rc3-Language-PDF-Fix-Preview.apk
+          git commit -m "Build v5.0.0-rc3 language and PDF fix preview APK" || exit 0
           git push
