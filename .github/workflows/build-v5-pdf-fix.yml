@@ -26,9 +26,26 @@ jobs:
           cat build-input/v5_pdf_fix/source.b64.part* | base64 -d > /tmp/igp-source.zip
           mkdir -p /tmp/igp-build
           unzip -q /tmp/igp-source.zip -d /tmp/igp-build || true
-          cp build-input/v5_pdf_fix/Relations.kt /tmp/igp-build/IGP/app/src/java/com/infinitygreenpower/organizerform/data/db/Relations.kt
+
+          # The compact build bundle stores the Android main source-set directly under app/src.
+          # Restore the canonical app/src/main layout before invoking AGP.
+          SRC=/tmp/igp-build/IGP/app/src
+          mkdir -p "$SRC/main"
+          for DIR in java res assets; do
+            if [ -d "$SRC/$DIR" ]; then
+              cp -a "$SRC/$DIR" "$SRC/main/"
+            fi
+          done
+          if [ -f "$SRC/AndroidManifest.xml" ]; then
+            cp "$SRC/AndroidManifest.xml" "$SRC/main/AndroidManifest.xml"
+          fi
+
+          # Repair the single file that was affected by transfer CRC corruption.
+          cp build-input/v5_pdf_fix/Relations.kt "$SRC/main/java/com/infinitygreenpower/organizerform/data/db/Relations.kt"
+
           test -f /tmp/igp-build/IGP/app/build.gradle.kts
-          test -f /tmp/igp-build/IGP/app/src/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt
+          test -f "$SRC/main/AndroidManifest.xml"
+          test -f "$SRC/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
