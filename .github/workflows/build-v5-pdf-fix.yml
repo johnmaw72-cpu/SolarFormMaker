@@ -43,70 +43,53 @@ jobs:
 
           python - <<'PY'
           from pathlib import Path
-          root=Path('/tmp/igp-build/IGP')
-          b=root/'app/build.gradle.kts'
-          s=b.read_text().replace('versionCode = 38','versionCode = 39').replace('versionName = "5.0.0-rc4"','versionName = "5.0.0-rc5"')
-          b.write_text(s)
+          root = Path('/tmp/igp-build/IGP')
 
-          form=root/'app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt'
-          s=form.read_text()
-          s=s.replace('import androidx.compose.ui.platform.LocalContext\n','import androidx.compose.ui.platform.LocalContext\nimport androidx.compose.ui.platform.LocalLayoutDirection\n')
-          s=s.replace('import androidx.compose.ui.text.font.FontWeight\n','import androidx.compose.ui.text.font.FontWeight\nimport androidx.compose.ui.text.style.TextAlign\n')
-          s=s.replace('import androidx.compose.ui.unit.dp\n','import androidx.compose.ui.unit.LayoutDirection\nimport androidx.compose.ui.unit.dp\n')
-          s=s.replace('Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)){ listOf("5","8","10","12","16","20","30").forEach{ AssistChip(onClick={vm.update{copy(capacity=it)}},label={Text("$it kW")}) } }','CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr){Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)){ listOf("5","8","10","12","16","20","30").forEach{ AssistChip(onClick={vm.update{copy(capacity=it)}},label={Text("$it kW")}) } }}')
-          old='@Composable private fun FormActions(step:Int,lang:String,onSave:()->Unit,onBack:()->Unit,onContinue:()->Unit){Surface(Modifier.imePadding(),shadowElevation=6.dp){Column(Modifier.navigationBarsPadding().padding(12.dp)){OutlinedButton(onSave,Modifier.fillMaxWidth().testTag("save-draft")){Icon(Icons.Outlined.Save,null);Text(tr(lang,"Save Draft","حفظ المسودة","ڕەشنووس پاشەکەوت بکە"))};Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)){if(step>1)OutlinedButton(onBack,Modifier.weight(1f)){Text(tr(lang,"Back","رجوع","گەڕانەوە"))};PrimaryButton(if(step==4)tr(lang,"Preview Form","معاينة الاستمارة","پێشبینینی فۆرم")else tr(lang,"Continue","متابعة","بەردەوام بە"),onContinue,Modifier.weight(1f))}}}}'
-          new='@Composable private fun FormActions(step:Int,lang:String,onSave:()->Unit,onBack:()->Unit,onContinue:()->Unit){Surface(Modifier.imePadding(),shadowElevation=6.dp){Column(Modifier.navigationBarsPadding().padding(12.dp)){OutlinedButton(onSave,Modifier.fillMaxWidth().testTag("save-draft")){Icon(Icons.Outlined.Save,null);Text(tr(lang,"Save Draft","حفظ المسودة","ڕەشنووس پاشەکەوت بکە"))};CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr){Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)){if(step>1)OutlinedButton(onBack,Modifier.weight(1f)){Text(tr(lang,"Back","رجوع","گەڕانەوە"),textAlign=TextAlign.Center)};PrimaryButton(if(step==4)tr(lang,"Preview Form","معاينة الاستمارة","پێشبینینی فۆرم")else tr(lang,"Continue","متابعة","بەردەوام بە"),onContinue,Modifier.weight(1f))}}}}}'
+          build = root/'app/build.gradle.kts'
+          s = build.read_text()
+          assert 'versionCode = 38' in s and 'versionName = "5.0.0-rc4"' in s
+          s = s.replace('versionCode = 38', 'versionCode = 39')
+          s = s.replace('versionName = "5.0.0-rc4"', 'versionName = "5.0.0-rc5"')
+          build.write_text(s)
+
+          form = root/'app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt'
+          s = form.read_text()
+          if 'import androidx.compose.ui.platform.LocalLayoutDirection' not in s:
+              s = s.replace('import androidx.compose.ui.platform.LocalContext\n', 'import androidx.compose.ui.platform.LocalContext\nimport androidx.compose.ui.platform.LocalLayoutDirection\n')
+          if 'import androidx.compose.ui.text.style.TextAlign' not in s:
+              s = s.replace('import androidx.compose.ui.text.font.FontWeight\n', 'import androidx.compose.ui.text.font.FontWeight\nimport androidx.compose.ui.text.style.TextAlign\n')
+          if 'import androidx.compose.ui.unit.LayoutDirection' not in s:
+              s = s.replace('import androidx.compose.ui.unit.dp\n', 'import androidx.compose.ui.unit.LayoutDirection\nimport androidx.compose.ui.unit.dp\n')
+
+          old = 'Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)){ listOf("5","8","10","12","16","20","30").forEach{ AssistChip(onClick={vm.update{copy(capacity=it)}},label={Text("$it kW")}) } }'
+          new = 'CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr){Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)){ listOf("5","8","10","12","16","20","30").forEach{ AssistChip(onClick={vm.update{copy(capacity=it)}},label={Text("$it kW")}) } }}'
           assert old in s
-          s=s.replace(old,new)
-          old='@Composable private fun Segment(values:List<String>,selected:String,labelFor:(String)->String={it},onSelect:(String)->Unit){SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()){values.forEachIndexed{i,v->SegmentedButton(selected==v,{onSelect(v)},SegmentedButtonDefaults.itemShape(i,values.size)){Text(labelFor(v),fontSize=11.sp)}}}}'
-          new='@Composable private fun Segment(values:List<String>,selected:String,labelFor:(String)->String={it},onSelect:(String)->Unit){CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr){SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()){values.forEachIndexed{i,v->SegmentedButton(selected==v,{onSelect(v)},SegmentedButtonDefaults.itemShape(i,values.size),Modifier.weight(1f).heightIn(min=48.dp)){Text(labelFor(v),fontSize=10.5.sp,lineHeight=13.sp,maxLines=2,textAlign=TextAlign.Center,modifier=Modifier.fillMaxWidth())}}}}}'
+          s = s.replace(old, new)
+
+          old = '@Composable private fun FormActions(step:Int,lang:String,onSave:()->Unit,onBack:()->Unit,onContinue:()->Unit){Surface(Modifier.imePadding(),shadowElevation=6.dp){Column(Modifier.navigationBarsPadding().padding(12.dp)){OutlinedButton(onSave,Modifier.fillMaxWidth().testTag("save-draft")){Icon(Icons.Outlined.Save,null);Text(tr(lang,"Save Draft","حفظ المسودة","ڕەشنووس پاشەکەوت بکە"))};Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)){if(step>1)OutlinedButton(onBack,Modifier.weight(1f)){Text(tr(lang,"Back","رجوع","گەڕانەوە"))};PrimaryButton(if(step==4)tr(lang,"Preview Form","معاينة الاستمارة","پێشبینینی فۆرم")else tr(lang,"Continue","متابعة","بەردەوام بە"),onContinue,Modifier.weight(1f))}}}}'
+          new = '@Composable private fun FormActions(step:Int,lang:String,onSave:()->Unit,onBack:()->Unit,onContinue:()->Unit){Surface(Modifier.imePadding(),shadowElevation=6.dp){Column(Modifier.navigationBarsPadding().padding(12.dp)){OutlinedButton(onSave,Modifier.fillMaxWidth().testTag("save-draft")){Icon(Icons.Outlined.Save,null);Text(tr(lang,"Save Draft","حفظ المسودة","ڕەشنووس پاشەکەوت بکە"))};CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr){Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)){if(step>1)OutlinedButton(onBack,Modifier.weight(1f)){Text(tr(lang,"Back","رجوع","گەڕانەوە"),textAlign=TextAlign.Center)};PrimaryButton(if(step==4)tr(lang,"Preview Form","معاينة الاستمارة","پێشبینینی فۆرم")else tr(lang,"Continue","متابعة","بەردەوام بە"),onContinue,Modifier.weight(1f))}}}}}'
           assert old in s
-          s=s.replace(old,new)
-          old='''                Row(
-                    Modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = { pageIndex = (pageIndex - 1).coerceAtLeast(0) },
-                        enabled = !loading && pageIndex > 0,
-                        modifier = Modifier.weight(1f)
-                    ) { Text(tr(lang, "Previous", "السابق", "پێشوو")) }
-                    Button(
-                        onClick = { pageIndex = (pageIndex + 1).coerceAtMost((pageCount - 1).coerceAtLeast(0)) },
-                        enabled = !loading && pageCount > 0 && pageIndex < pageCount - 1,
-                        modifier = Modifier.weight(1f)
-                    ) { Text(tr(lang, "Next", "التالي", "دواتر")) }
-                }'''
-          new='''                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                    Row(
-                        Modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = { pageIndex = (pageIndex - 1).coerceAtLeast(0) },
-                            enabled = !loading && pageIndex > 0,
-                            modifier = Modifier.weight(1f)
-                        ) { Text(tr(lang, "Previous", "السابق", "پێشوو"), textAlign = TextAlign.Center) }
-                        Button(
-                            onClick = { pageIndex = (pageIndex + 1).coerceAtMost((pageCount - 1).coerceAtLeast(0)) },
-                            enabled = !loading && pageCount > 0 && pageIndex < pageCount - 1,
-                            modifier = Modifier.weight(1f)
-                        ) { Text(tr(lang, "Next", "التالي", "دواتر"), textAlign = TextAlign.Center) }
-                    }
-                }'''
+          s = s.replace(old, new)
+
+          old = '@Composable private fun Segment(values:List<String>,selected:String,labelFor:(String)->String={it},onSelect:(String)->Unit){SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()){values.forEachIndexed{i,v->SegmentedButton(selected==v,{onSelect(v)},SegmentedButtonDefaults.itemShape(i,values.size)){Text(labelFor(v),fontSize=11.sp)}}}}'
+          new = '@Composable private fun Segment(values:List<String>,selected:String,labelFor:(String)->String={it},onSelect:(String)->Unit){CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr){SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()){values.forEachIndexed{i,v->SegmentedButton(selected==v,{onSelect(v)},SegmentedButtonDefaults.itemShape(i,values.size),Modifier.weight(1f).heightIn(min=48.dp)){Text(labelFor(v),fontSize=10.5.sp,lineHeight=13.sp,maxLines=2,textAlign=TextAlign.Center,modifier=Modifier.fillMaxWidth())}}}}}'
           assert old in s
-          s=s.replace(old,new)
+          s = s.replace(old, new)
           form.write_text(s)
 
-          settings=root/'app/src/main/java/com/infinitygreenpower/organizerform/feature/settings/SettingsScreen.kt'
-          s=settings.read_text()
-          s=s.replace('import androidx.compose.ui.platform.LocalContext\n','import androidx.compose.ui.platform.LocalContext\nimport androidx.compose.ui.platform.LocalLayoutDirection\n')
-          s=s.replace('import androidx.compose.ui.text.font.FontWeight\n','import androidx.compose.ui.text.font.FontWeight\nimport androidx.compose.ui.text.style.TextAlign\n')
-          s=s.replace('import androidx.compose.ui.unit.dp\n','import androidx.compose.ui.unit.LayoutDirection\nimport androidx.compose.ui.unit.dp\n')
-          old='SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()){listOf("en" to "English","ar" to "العربية","ckb" to "کوردی").forEachIndexed{i,(code,label)->SegmentedButton(s.language==code,{vm.setLanguage(code)},SegmentedButtonDefaults.itemShape(i,3)){Text(label,fontSize=11.sp)}}}'
-          new='CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr){SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()){listOf("en" to "English","ar" to "العربية","ckb" to "کوردی").forEachIndexed{i,(code,label)->SegmentedButton(s.language==code,{vm.setLanguage(code)},SegmentedButtonDefaults.itemShape(i,3),Modifier.weight(1f).heightIn(min=44.dp)){Text(label,fontSize=11.sp,maxLines=1,textAlign=TextAlign.Center,modifier=Modifier.fillMaxWidth())}}}}'
+          settings = root/'app/src/main/java/com/infinitygreenpower/organizerform/feature/settings/SettingsScreen.kt'
+          s = settings.read_text()
+          if 'import androidx.compose.ui.platform.LocalLayoutDirection' not in s:
+              s = s.replace('import androidx.compose.ui.platform.LocalContext\n', 'import androidx.compose.ui.platform.LocalContext\nimport androidx.compose.ui.platform.LocalLayoutDirection\n')
+          if 'import androidx.compose.ui.text.style.TextAlign' not in s:
+              s = s.replace('import androidx.compose.ui.text.font.FontWeight\n', 'import androidx.compose.ui.text.font.FontWeight\nimport androidx.compose.ui.text.style.TextAlign\n')
+          if 'import androidx.compose.ui.unit.LayoutDirection' not in s:
+              s = s.replace('import androidx.compose.ui.unit.dp\n', 'import androidx.compose.ui.unit.LayoutDirection\nimport androidx.compose.ui.unit.dp\n')
+
+          old = 'SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()){listOf("en" to "English","ar" to "العربية","ckb" to "کوردی").forEachIndexed{i,(code,label)->SegmentedButton(s.language==code,{vm.setLanguage(code)},SegmentedButtonDefaults.itemShape(i,3)){Text(label,fontSize=11.sp)}}}'
+          new = 'CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr){SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()){listOf("en" to "English","ar" to "العربية","ckb" to "کوردی").forEachIndexed{i,(code,label)->SegmentedButton(s.language==code,{vm.setLanguage(code)},SegmentedButtonDefaults.itemShape(i,3),Modifier.weight(1f).heightIn(min=44.dp)){Text(label,fontSize=11.sp,maxLines=1,textAlign=TextAlign.Center,modifier=Modifier.fillMaxWidth())}}}}'
           assert old in s
-          settings.write_text(s.replace(old,new))
+          settings.write_text(s.replace(old, new))
           PY
 
           sed -i 's#<string name="app_name">IGP Organizer Form</string>#<string name="app_name">IGP Organizer Form Preview</string>#' "$SRC/main/res/values/strings.xml"
@@ -118,9 +101,11 @@ jobs:
           FORM="$SRC/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt"
           SETTINGS="$SRC/main/java/com/infinitygreenpower/organizerform/feature/settings/SettingsScreen.kt"
           test "$(sha256sum "$BUILD" | awk '{print $1}')" = "604bf8be24417112b80d14f2f64832b3836691fc13784f99d6dbb8ab5adee5e1"
-          test "$(sha256sum "$FORM" | awk '{print $1}')" = "2f51ee1fe0fc3abe334cc7201f00fc42e687b81b51558c3a23c9bbc3ea0b4b80"
+          test "$(sha256sum "$FORM" | awk '{print $1}')" = "cf55c829c6aed87e9c3ea7ef9941af4bca6ef7b2ba5976a699c36e700a2a8791"
           test "$(sha256sum "$SETTINGS" | awk '{print $1}')" = "849596bafc27b853e2068597c874be5f7151a840d7bf8e0f20f16b6a2f054ae2"
           grep -q 'applicationIdSuffix = ".preview"' "$BUILD"
+          grep -q 'versionCode = 39' "$BUILD"
+          grep -q 'versionName = "5.0.0-rc5"' "$BUILD"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -158,7 +143,7 @@ jobs:
           APK=/tmp/igp-build/IGP/app/build/outputs/apk/debug/app-debug.apk
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
           APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
-          test -s "$APK"
+          test -s "$APK" && test -x "$AAPT" && test -x "$APKSIGNER"
           BADGING=$("$AAPT" dump badging "$APK" | head -n 1)
           echo "$BADGING"
           echo "$BADGING" | grep "name='com.infinitygreenpower.offerstudio.preview'"
