@@ -1,0 +1,21 @@
+name: Trigger IGP RC6 Rebuild
+
+on:
+  push:
+    branches:
+      - chatgpt-v5-pdf-fix-build
+    paths:
+      - '.github/workflows/trigger-v5-rc6-rebuild.yml'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch corrected RC6 build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build-v5-rc6-rtl-pdf-v2.yml --repo johnmaw72-cpu/SolarFormMaker --ref chatgpt-v5-pdf-fix-build
