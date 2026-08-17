@@ -1,0 +1,135 @@
+name: Build IGP RC6 RTL PDF Fix APK v3
+
+on:
+  push:
+    branches:
+      - chatgpt-v5-pdf-fix-build
+    paths:
+      - '.github/workflows/build-v5-rc6-rtl-pdf-v3.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reconstruct RC6 source
+        shell: bash
+        run: |
+          cat build-input/v5_pdf_fix/source.b64.part* | base64 -d > /tmp/igp-source.zip
+          mkdir -p /tmp/igp-build
+          unzip -q /tmp/igp-source.zip -d /tmp/igp-build || true
+          SRC=/tmp/igp-build/IGP/app/src
+          mkdir -p "$SRC/main"
+          for DIR in java res assets; do
+            if [ -d "$SRC/$DIR" ]; then cp -a "$SRC/$DIR" "$SRC/main/"; fi
+          done
+          if [ -f "$SRC/AndroidManifest.xml" ]; then cp "$SRC/AndroidManifest.xml" "$SRC/main/AndroidManifest.xml"; fi
+          cp build-input/v5_pdf_fix/Relations.kt "$SRC/main/java/com/infinitygreenpower/organizerform/data/db/Relations.kt"
+
+          cat build-input/v5_language_fix/overlay.b64.part* | base64 -d > /tmp/rc3-overlay.tar.gz
+          test "$(sha256sum /tmp/rc3-overlay.tar.gz | awk '{print $1}')" = "34e246853dc4d297e6f1c4ee3c4f8446ee16966f5188105b856ed1cb0af5711e"
+          tar -xzf /tmp/rc3-overlay.tar.gz -C /tmp/igp-build/IGP
+
+          cat build-input/v5_rc4_fix/overlay.b64.part* | base64 -d > /tmp/rc4-overlay.tar.gz
+          test "$(sha256sum /tmp/rc4-overlay.tar.gz | awk '{print $1}')" = "5c2d81ba10375c24b595a6f138e1f6906959d9922e1c5e5e74e71fd8253eef0d"
+          tar -xzf /tmp/rc4-overlay.tar.gz -C /tmp/igp-build/IGP
+
+          cat \
+            build-input/v5_rc6_fix/patch.b64.part00 \
+            build-input/v5_rc6_fix/p01small.00 \
+            build-input/v5_rc6_fix/p01small.01 \
+            build-input/v5_rc6_fix/p01small.02 \
+            build-input/v5_rc6_fix/p01small.03 \
+            build-input/v5_rc6_fix/patch.b64.part02 \
+            | base64 -d > /tmp/rc6.patch
+          test "$(sha256sum /tmp/rc6.patch | awk '{print $1}')" = "d292f077b97c84aeb49a2fd07d5f60e1b620d8e1b431e339a8bcb253f4b7771f"
+          cd /tmp/igp-build/IGP
+          patch -p1 < /tmp/rc6.patch
+
+          sed -i 's#<string name="app_name">IGP Organizer Form</string>#<string name="app_name">IGP Organizer Form Preview</string>#' "$SRC/main/res/values/strings.xml"
+          sed -i 's#<string name="app_name">استمارة منظم IGP</string>#<string name="app_name">استمارة منظم IGP - تجريبي</string>#' "$SRC/main/res/values-ar/strings.xml"
+          sed -i 's#<string name="app_name">فۆرمی ڕێکخەری IGP</string>#<string name="app_name">فۆرمی ڕێکخەری IGP - تاقیکردنەوە</string>#' "$SRC/main/res/values-b+ckb/strings.xml"
+
+          cat build-input/v5_language_fix/preview-test-keystore.b64 | base64 -d > /tmp/igp-preview-test.jks
+
+          BUILD=/tmp/igp-build/IGP/app/build.gradle.kts
+          PDF="$SRC/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt"
+          grep -Fq 'versionCode = 40' "$BUILD"
+          grep -Fq 'versionName = "5.0.0-rc6"' "$BUILD"
+          grep -Fq 'applicationIdSuffix = ".preview"' "$BUILD"
+          grep -Fq 'FIRSTSTRONG_RTL' "$PDF"
+          grep -Fq 'val labelWidth = 132' "$PDF"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Gradle 9.4.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Build RC6 preview APK
+        working-directory: /tmp/igp-build/IGP
+        shell: bash
+        env:
+          IGP_PREVIEW_KEYSTORE: /tmp/igp-preview-test.jks
+          IGP_PREVIEW_STORE_PASSWORD: IGPPreview2026!
+          IGP_PREVIEW_KEY_ALIAS: igp-preview
+          IGP_PREVIEW_KEY_PASSWORD: IGPPreview2026!
+        run: gradle --no-daemon clean assembleDebug
+
+      - name: Verify update identity and APK
+        shell: bash
+        run: |
+          APK=/tmp/igp-build/IGP/app/build/outputs/apk/debug/app-debug.apk
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          test -s "$APK" && test -x "$AAPT" && test -x "$APKSIGNER"
+          BADGING=$("$AAPT" dump badging "$APK" | head -n 1)
+          echo "$BADGING"
+          echo "$BADGING" | grep "name='com.infinitygreenpower.offerstudio.preview'"
+          echo "$BADGING" | grep "versionCode='40'"
+          echo "$BADGING" | grep "versionName='5.0.0-rc6-test'"
+          "$APKSIGNER" verify --print-certs "$APK" | tee /tmp/signing.txt
+          grep -qi '1f83a683d692d6530df5ba8e4ba1892e18bb11a313c5f744b464f3bf003c06f0' /tmp/signing.txt
+          unzip -t "$APK" >/dev/null
+          cp "$APK" IGP-Organizer-Form-5.0.0-rc6-RTL-PDF-Compact-Fix.apk
+          sha256sum IGP-Organizer-Form-5.0.0-rc6-RTL-PDF-Compact-Fix.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: IGP-Organizer-Form-5.0.0-rc6-RTL-PDF-Compact-Fix-APK
+          path: IGP-Organizer-Form-5.0.0-rc6-RTL-PDF-Compact-Fix.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish APK to build branch
+        shell: bash
+        run: |
+          mkdir -p build-output
+          cp IGP-Organizer-Form-5.0.0-rc6-RTL-PDF-Compact-Fix.apk build-output/
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add build-output/IGP-Organizer-Form-5.0.0-rc6-RTL-PDF-Compact-Fix.apk
+          git commit -m "Build v5.0.0-rc6 RTL PDF compact fix APK" || exit 0
+          git push
