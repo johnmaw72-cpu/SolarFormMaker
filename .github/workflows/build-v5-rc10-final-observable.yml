@@ -1,0 +1,293 @@
+name: Build IGP RC10 Final Observable
+
+on:
+  push:
+    branches: [chatgpt-v5-pdf-fix-build]
+    paths: ['.github/workflows/build-v5-rc10-final-observable.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish run id
+        shell: bash
+        run: |
+          mkdir -p build-output
+          echo "${GITHUB_RUN_ID}" > build-output/rc10-final-run-id.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add build-output/rc10-final-run-id.txt
+          git commit -m 'Publish RC10 final run id' || true
+          git push || true
+
+      - name: Reconstruct and patch RC10 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat build-input/v5_pdf_fix/source.b64.part* | base64 -d > /tmp/igp-source.zip
+          rm -rf /tmp/igp-build && mkdir -p /tmp/igp-build
+          unzip -q /tmp/igp-source.zip -d /tmp/igp-build || true
+          ROOT=/tmp/igp-build/IGP
+          SRC=$ROOT/app/src
+          mkdir -p "$SRC/main"
+          for DIR in java res assets; do [ -d "$SRC/$DIR" ] && cp -a "$SRC/$DIR" "$SRC/main/" || true; done
+          [ -f "$SRC/AndroidManifest.xml" ] && cp "$SRC/AndroidManifest.xml" "$SRC/main/AndroidManifest.xml" || true
+          cp build-input/v5_pdf_fix/Relations.kt "$SRC/main/java/com/infinitygreenpower/organizerform/data/db/Relations.kt"
+          cat build-input/v5_language_fix/overlay.b64.part* | base64 -d > /tmp/rc3-overlay.tar.gz
+          tar -xzf /tmp/rc3-overlay.tar.gz -C "$ROOT"
+          cat build-input/v5_rc4_fix/overlay.b64.part* | base64 -d > /tmp/rc4-overlay.tar.gz
+          tar -xzf /tmp/rc4-overlay.tar.gz -C "$ROOT"
+
+          BASE=build-input/v5_rc10_fix
+          PKG=$SRC/main/java/com/infinitygreenpower/organizerform
+          cp "$BASE/FormModels.kt" "$PKG/feature/form/FormModels.kt"
+          cp "$BASE/FormViewModel.kt" "$PKG/feature/form/FormViewModel.kt"
+          cp "$BASE/FormScreen.kt" "$PKG/feature/form/FormScreen.kt"
+          cp "$BASE/CatalogScreen.kt" "$PKG/feature/catalog/CatalogScreen.kt"
+          cp "$BASE/PdfExporter.kt" "$PKG/export/pdf/PdfExporter.kt"
+          cp "$BASE/FormExportModel.kt" "$PKG/export/json/FormExportModel.kt"
+          cp "$BASE/Daos.kt" "$PKG/data/db/Daos.kt"
+          cp "$BASE/IGPOrganizerApp.kt" "$PKG/app/IGPOrganizerApp.kt"
+          cp "$BASE/SettingsScreen.kt" "$PKG/feature/settings/SettingsScreen.kt"
+
+          python - <<'PY'
+          from pathlib import Path
+          root=Path('/tmp/igp-build/IGP/app/src/main/java/com/infinitygreenpower/organizerform')
+
+          # ----- Form models -----
+          p=root/'feature/form/FormModels.kt'; t=p.read_text()
+          old='''    val quantity: Int = 1,
+    val unitPrice: String = ""
+'''
+          new='''    val quantity: Int = 1,
+    val unitPrice: String = "",
+    val approximate: Boolean = false
+'''
+          assert old in t, 'DraftItem fields anchor missing'
+          t=t.replace(old,new,1)
+          anchor='fun generatedLoadNote(state: FormUiState, language: String): String {'
+          helper='''const val STANDARD_NOTE_AC = "لا یشمل مواد واعمال AC"
+const val STANDARD_NOTE_CIVIL = "لا یشمل اعمال مدنیة ان وجدت"
+
+fun addStandardExclusionNotes(current: String): String {
+    val missing = listOf(STANDARD_NOTE_AC, STANDARD_NOTE_CIVIL).filterNot { current.contains(it) }
+    if (missing.isEmpty()) return current
+    val prefix = current.trimEnd()
+    val addition = missing.joinToString("\\n") { "- $it" }
+    return if (prefix.isBlank()) addition else "$prefix\\n$addition"
+}
+
+'''
+          assert anchor in t, 'generatedLoadNote anchor missing'
+          t=t.replace(anchor,helper+anchor,1)
+          p.write_text(t)
+
+          # ----- View model / persistence -----
+          p=root/'feature/form/FormViewModel.kt'; t=p.read_text()
+          old='fun addCustom(name: String, category: String, quantity: Int, price: String) {'
+          new='fun addCustom(name: String, category: String, quantity: Int, price: String, approximate: Boolean = false) {'
+          assert old in t, 'addCustom signature missing'
+          t=t.replace(old,new,1)
+          old='''                quantity = quantity.coerceAtLeast(1),
+                unitPrice = price
+'''
+          new='''                quantity = quantity.coerceAtLeast(1),
+                unitPrice = price,
+                approximate = approximate
+'''
+          assert old in t, 'addCustom item anchor missing'
+          t=t.replace(old,new,1)
+          old='item.quantity.toString(), item.unitPrice.ifBlank { null }, snapshot.currency, index'
+          new='((if (item.approximate) "~" else "") + item.quantity.toString()), item.unitPrice.ifBlank { null }, snapshot.currency, index'
+          assert old in t, 'persist quantity anchor missing'
+          t=t.replace(old,new,1)
+          old='''        DraftItem(
+            it.id, it.catalogItemId, it.itemNameSnapshot, it.categorySnapshot,
+            it.specificationSnapshot, it.quantity.toIntOrNull() ?: 1, it.unitPrice.orEmpty()
+        )
+'''
+          new='''        DraftItem(
+            id = it.id,
+            catalogId = it.catalogItemId,
+            name = it.itemNameSnapshot,
+            category = it.categorySnapshot,
+            specification = it.specificationSnapshot,
+            quantity = it.quantity.removePrefix("~").toIntOrNull() ?: 1,
+            unitPrice = it.unitPrice.orEmpty(),
+            approximate = it.quantity.startsWith("~")
+        )
+'''
+          assert old in t, 'toUi DraftItem anchor missing'
+          t=t.replace(old,new,1)
+          p.write_text(t)
+
+          # ----- Form UI -----
+          p=root/'feature/form/FormScreen.kt'; t=p.read_text()
+          old='vm.addCustom(item.name, item.category, item.quantity, item.unitPrice)'
+          new='vm.addCustom(item.name, item.category, item.quantity, item.unitPrice, item.approximate)'
+          assert old in t, 'custom item save call missing'
+          t=t.replace(old,new,1)
+
+          old='Text(x.category,color=Muted,fontSize=12.sp); Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween)'
+          new='Text(x.category,color=Muted,fontSize=12.sp); FilterChip(selected=x.approximate,onClick={vm.updateItem(x.copy(approximate=!x.approximate))},label={Text(tr(lang,"Approx.","تقريباً","نزیکەی"))}); Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween)'
+          assert old in t, 'item row category anchor missing'
+          t=t.replace(old,new,1)
+
+          old='Text("${x.quantity}",fontWeight=FontWeight.Bold)'
+          new='Text(if(x.approximate) "${tr(lang,"Approx.","تقريباً","نزیکەی")} ${x.quantity}" else "${x.quantity}",fontWeight=FontWeight.Bold)'
+          assert old in t, 'item quantity text anchor missing'
+          t=t.replace(old,new,1)
+
+          old='s.items.forEach{Summary(it.name,"${it.quantity} × ${it.unitPrice.ifBlank{"—"}}")}'
+          new='s.items.forEach{Summary(it.name,"${if(it.approximate) tr(lang,"Approx.","تقريباً","نزیکەی")+" " else ""}${it.quantity} × ${it.unitPrice.ifBlank{"—"}}")}'
+          assert old in t, 'preview item summary anchor missing'
+          t=t.replace(old,new,1)
+
+          old='Field(s.customNote,{v->vm.update{copy(customNote=v)}},tr(lang,"Custom note (optional)","ملاحظة مخصصة (اختياري)","تێبینی تایبەت"),false,singleLine=false) } }'
+          new='Field(s.customNote,{v->vm.update{copy(customNote=v)}},tr(lang,"Custom note (optional)","ملاحظة مخصصة (اختياري)","تێبینی تایبەت"),false,singleLine=false); OutlinedButton({vm.update{copy(customNote=addStandardExclusionNotes(customNote))}},Modifier.fillMaxWidth().padding(top=6.dp)){Icon(Icons.Outlined.Add,null);Text(tr(lang,"Add AC & civil-work exclusions","إضافة ملاحظات AC والأعمال المدنية","زیادکردنی تێبینی AC و کاری مەدەنی"))} } }'
+          assert old in t, 'custom note field anchor missing'
+          t=t.replace(old,new,1)
+
+          old='Field(item.quantity.toString(),{item=item.copy(quantity=it.toIntOrNull()?.coerceAtLeast(1)?:1)},tr(lang,"Quantity","الكمية","بڕ"),keyboard=KeyboardType.Number);Field(item.unitPrice'
+          new='Field(item.quantity.toString(),{item=item.copy(quantity=it.toIntOrNull()?.coerceAtLeast(1)?:1)},tr(lang,"Quantity","الكمية","بڕ"),keyboard=KeyboardType.Number);Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){Checkbox(item.approximate,{item=item.copy(approximate=it)});Text(tr(lang,"Approximate quantity","الكمية تقريباً","بڕ بە نزیکەیی"))};Field(item.unitPrice'
+          assert old in t, 'item editor quantity anchor missing'
+          t=t.replace(old,new,1)
+          p.write_text(t)
+
+          # ----- PDF -----
+          p=root/'export/pdf/PdfExporter.kt'; t=p.read_text()
+          old='''                val itemWidth = if (settings.showPrices) 365 else 455
+                val quantityWidth = 60
+'''
+          new='''                val itemWidth = if (settings.showPrices) 347 else 437
+                val quantityWidth = 78
+'''
+          assert old in t, 'materials widths anchor missing'
+          t=t.replace(old,new,1)
+          old='''            val itemWidth = if (settings.showPrices) 365 else 455
+            val quantityWidth = 60
+'''
+          new='''            val itemWidth = if (settings.showPrices) 347 else 437
+            val quantityWidth = 78
+'''
+          assert old in t, 'material header widths anchor missing'
+          t=t.replace(old,new,1)
+          old='val quantity = item.quantity.toString()'
+          new='val quantity = if (item.approximate) "${t(lang, "Approx.", "تقريباً", "نزیکەی")} ${item.quantity}" else item.quantity.toString()'
+          assert old in t, 'PDF quantity anchor missing'
+          t=t.replace(old,new,1)
+          old='''                    it.quantity.toString(),
+                    it.unitPrice.ifBlank { null },
+'''
+          new='''                    it.quantity.toString(),
+                    it.approximate,
+                    it.unitPrice.ifBlank { null },
+'''
+          assert old in t, 'ExportItem mapping anchor missing'
+          t=t.replace(old,new,1)
+          p.write_text(t)
+
+          # ----- JSON -----
+          p=root/'export/json/FormExportModel.kt'; t=p.read_text()
+          old='data class ExportItem(val catalogId: String?, val category: String, val name: String, val quantity: String, val unitPrice: String?, val currency: String, val lineTotal: String?)'
+          new='data class ExportItem(val catalogId: String?, val category: String, val name: String, val quantity: String, val approximate: Boolean, val unitPrice: String?, val currency: String, val lineTotal: String?)'
+          assert old in t, 'ExportItem declaration anchor missing'
+          t=t.replace(old,new,1)
+          old='.put("quantity", item.quantity).put("unit_price", item.unitPrice ?: JSONObject.NULL)'
+          new='.put("quantity", item.quantity).put("approximate", item.approximate).put("unit_price", item.unitPrice ?: JSONObject.NULL)'
+          assert old in t, 'ExportItem JSON anchor missing'
+          t=t.replace(old,new,1)
+          p.write_text(t)
+
+          # ----- Version -----
+          build=Path('/tmp/igp-build/IGP/app/build.gradle.kts')
+          t=build.read_text()
+          t=t.replace('versionCode = 38','versionCode = 44')
+          t=t.replace('versionName = "5.0.0-rc4"','versionName = "5.0.0-rc10"')
+          build.write_text(t)
+          PY
+
+          sed -i 's#<string name="app_name">IGP Organizer Form</string>#<string name="app_name">IGP Organizer Form Preview</string>#' "$SRC/main/res/values/strings.xml"
+          sed -i 's#<string name="app_name">استمارة منظم IGP</string>#<string name="app_name">استمارة منظم IGP - تجريبي</string>#' "$SRC/main/res/values-ar/strings.xml"
+          sed -i 's#<string name="app_name">فۆرمی ڕێکخەری IGP</string>#<string name="app_name">فۆرمی ڕێکخەری IGP - تاقیکردنەوە</string>#' "$SRC/main/res/values-b+ckb/strings.xml"
+          cat build-input/v5_language_fix/preview-test-keystore.b64 | base64 -d > /tmp/igp-preview-test.jks
+
+          grep -Fq 'selected = isSelected' "$PKG/feature/form/FormScreen.kt"
+          grep -Fq 'Add AC & civil-work exclusions' "$PKG/feature/form/FormScreen.kt"
+          grep -Fq 'approximate = it.quantity.startsWith("~")' "$PKG/feature/form/FormViewModel.kt"
+          grep -Fq 'suspend fun upsert(item: CatalogItemEntity)' "$PKG/data/db/Daos.kt"
+          grep -Fq 'Add Catalog Item' "$PKG/feature/catalog/CatalogScreen.kt"
+          grep -Fq 'Edit Catalog Item' "$PKG/feature/catalog/CatalogScreen.kt"
+          grep -Fq 'put("approximate", item.approximate)' "$PKG/export/json/FormExportModel.kt"
+          grep -Fq 'versionCode = 44' "$ROOT/app/build.gradle.kts"
+          grep -Fq 'versionName = "5.0.0-rc10"' "$ROOT/app/build.gradle.kts"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Build APK
+        working-directory: /tmp/igp-build/IGP
+        env:
+          IGP_PREVIEW_KEYSTORE: /tmp/igp-preview-test.jks
+          IGP_PREVIEW_STORE_PASSWORD: IGPPreview2026!
+          IGP_PREVIEW_KEY_ALIAS: igp-preview
+          IGP_PREVIEW_KEY_PASSWORD: IGPPreview2026!
+        run: gradle --no-daemon clean assembleDebug
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=/tmp/igp-build/IGP/app/build/outputs/apk/debug/app-debug.apk
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          BADGING=$("$AAPT" dump badging "$APK" | head -n 1)
+          echo "$BADGING"
+          echo "$BADGING" | grep "name='com.infinitygreenpower.offerstudio.preview'"
+          echo "$BADGING" | grep "versionCode='44'"
+          echo "$BADGING" | grep "versionName='5.0.0-rc10-test'"
+          "$APKSIGNER" verify --print-certs "$APK" | tee /tmp/signing.txt
+          grep -qi '1f83a683d692d6530df5ba8e4ba1892e18bb11a313c5f744b464f3bf003c06f0' /tmp/signing.txt
+          unzip -t "$APK" >/dev/null
+          cp "$APK" IGP-Organizer-Form-5.0.0-rc10-Final.apk
+          sha256sum IGP-Organizer-Form-5.0.0-rc10-Final.apk | tee /tmp/rc10-sha.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IGP-Organizer-Form-5.0.0-rc10-Final-APK
+          path: IGP-Organizer-Form-5.0.0-rc10-Final.apk
+          retention-days: 7
+
+      - name: Publish APK and source snapshot
+        shell: bash
+        run: |
+          mkdir -p build-output
+          cp IGP-Organizer-Form-5.0.0-rc10-Final.apk build-output/
+          cp /tmp/rc10-sha.txt build-output/IGP-Organizer-Form-5.0.0-rc10-Final.sha256.txt
+          cd /tmp/igp-build
+          zip -qr "$GITHUB_WORKSPACE/build-output/IGP-Organizer-Form-5.0.0-rc10-Final-source.zip" IGP
+          cd "$GITHUB_WORKSPACE"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git pull --rebase origin chatgpt-v5-pdf-fix-build || true
+          git add build-output/IGP-Organizer-Form-5.0.0-rc10-Final.apk build-output/IGP-Organizer-Form-5.0.0-rc10-Final.sha256.txt build-output/IGP-Organizer-Form-5.0.0-rc10-Final-source.zip
+          git commit -m 'Publish v5.0.0-rc10 final APK and source' || exit 0
+          git push
