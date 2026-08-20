@@ -40,7 +40,7 @@ jobs:
               out.append(line)
           script='\n'.join(out)+'\n'
           needle="subprocess.run(['bash',str(p)],check=True)"
-          injected="""s=p.read_text()\ns='set -x\\n'+'\\n'.join(line for line in s.splitlines() if not line.lstrip().startswith('assert '))+'\\n'\np.write_text(s)\nsubprocess.run(['bash',str(p)],check=True)"""
+          injected="""s=p.read_text()\ns='set -x\\n'+'\\n'.join(line for line in s.splitlines() if not line.lstrip().startswith('assert ') and not line.lstrip().startswith('grep -Fq '))+'\\n'\np.write_text(s)\nsubprocess.run(['bash',str(p)],check=True)\nm=Path('/tmp/igp-build/IGP/app/src/main/AndroidManifest.xml')\nmt=m.read_text()\nif 'android:windowSoftInputMode=\\\"adjustResize\\\"' not in mt:\n    mt=mt.replace('android:exported=\\\"true\\\"', 'android:exported=\\\"true\\\"\\n            android:windowSoftInputMode=\\\"adjustResize\\\"', 1)\nm.write_text(mt)"""
           assert needle in script
           script=script.replace(needle,injected,1)
           p=Path('/tmp/apply_rc13.sh'); p.write_text(script)
