@@ -3,7 +3,7 @@ name: Build IGP RC9 Retry
 on:
   push:
     branches:
-      - chatgpt-v5-pdf-fix-build
+      - chatgpt-rc9-catalog-build
     paths:
       - '.github/workflows/build-v5-rc9-retry.yml'
   workflow_dispatch:
