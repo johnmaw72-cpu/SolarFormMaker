@@ -1,1 +1,1 @@
-Trigger RC14 source packaging after the source workflow was added to main.
+Trigger RC14 source packaging after reopening the temporary PR.
