@@ -1,4 +1,5 @@
 name: Build IGP RC9 Diagnostic
+# trigger: compile RC9 catalog add/edit + checkmark layout
 
 on:
   push:
