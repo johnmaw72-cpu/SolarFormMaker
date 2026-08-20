@@ -4,6 +4,8 @@ on:
   push:
     branches: [chatgpt-v5-pdf-fix-build]
     paths: ['.github/workflows/build-v5-rc12-insets-pdf-note-column.yml']
+  pull_request:
+    branches: [chatgpt-v5-pdf-fix-build]
   workflow_dispatch:
 
 permissions:
@@ -17,6 +19,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Publish run id
+        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           mkdir -p build-output
@@ -44,12 +47,10 @@ jobs:
 
           python - <<'PY'
           from pathlib import Path
-          import re
 
           root=Path('/tmp/igp-build/IGP')
           pkg=root/'app/src/main/java/com/infinitygreenpower/organizerform'
 
-          # ----- Top/system bar + keyboard behavior -----
           app=pkg/'app/IGPOrganizerApp.kt'
           t=app.read_text()
           if 'import androidx.compose.foundation.layout.ime\n' not in t:
@@ -62,11 +63,11 @@ jobs:
     val density = LocalDensity.current
     val imeVisible = WindowInsets.ime.getBottom(density) > 0
     val select: (Destination) -> Unit = { destination ->'''
-          assert old in t, 'OrganizerNavigation anchor missing'
+          assert old in t
           t=t.replace(old,new,1)
-          assert 'contentWindowInsets = WindowInsets(0),' in t, 'old top-level insets anchor missing'
+          assert 'contentWindowInsets = WindowInsets(0),' in t
           t=t.replace('contentWindowInsets = WindowInsets(0),','contentWindowInsets = WindowInsets.safeDrawing,',1)
-          assert 'if (!expanded) NavigationBar {' in t, 'bottom nav anchor missing'
+          assert 'if (!expanded) NavigationBar {' in t
           t=t.replace('if (!expanded) NavigationBar {','if (!expanded && !imeVisible) NavigationBar {',1)
           app.write_text(t)
 
@@ -79,9 +80,8 @@ jobs:
             android:name=".MainActivity"
             android:exported="true"
             android:windowSoftInputMode="adjustResize">'''
-          assert old in t, 'MainActivity manifest anchor missing'
-          t=t.replace(old,new,1)
-          manifest.write_text(t)
+          assert old in t
+          manifest.write_text(t.replace(old,new,1))
 
           form=pkg/'feature/form/FormScreen.kt'
           t=form.read_text()
@@ -122,11 +122,10 @@ jobs:
             contentPadding = PaddingValues(18.dp, 20.dp, 18.dp, 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {'''
-          assert old in t, 'Form Scaffold/LazyColumn anchor missing'
+          assert old in t
           t=t.replace(old,new,1)
           form.write_text(t)
 
-          # ----- PDF materials: quantity is numeric only; Approx. is a separate Note column -----
           pdf=pkg/'export/pdf/PdfExporter.kt'
           t=pdf.read_text()
           start=t.index('        fun materials(s: FormUiState, settings: Settings) {')
@@ -145,7 +144,6 @@ jobs:
                 val quantityX: Int
                 val itemX: Int
                 if (rtl) {
-                    // RTL visual order from right to left: Item, Qty, Note, Unit Price.
                     priceX = left
                     noteX = left + priceWidth
                     quantityX = noteX + noteWidth
@@ -157,79 +155,31 @@ jobs:
                     priceX = noteX + noteWidth
                 }
                 val textWidth = itemWidth - 14
-
                 val name = "${index + 1}. ${item.name.trim()}"
                 val specification = item.specification.trim()
                 val nameHeight = measure(name, textWidth, 9, true, Layout.Alignment.ALIGN_NORMAL)
-                val specHeight = if (specification.isBlank()) 0 else measure(
-                    specification,
-                    textWidth,
-                    8,
-                    false,
-                    Layout.Alignment.ALIGN_NORMAL
-                )
+                val specHeight = if (specification.isBlank()) 0 else measure(specification, textWidth, 8, false, Layout.Alignment.ALIGN_NORMAL)
                 val rowHeight = maxOf(28, 4 + nameHeight + (if (specHeight > 0) 1 + specHeight else 0) + 4)
-
                 ensure(rowHeight) { materialHeader(settings) }
-
                 paint.color = if (index % 2 == 0) rowTint else Color.WHITE
                 canvas!!.drawRect(left.toFloat(), y.toFloat(), right.toFloat(), (y + rowHeight).toFloat(), paint)
-
                 drawCell(name, itemX + 7f, y + 4, textWidth, 9, true, navy, Layout.Alignment.ALIGN_NORMAL)
-                if (specification.isNotBlank()) {
-                    drawCell(
-                        specification,
-                        itemX + 7f,
-                        y + 4 + nameHeight + 1,
-                        textWidth,
-                        8,
-                        false,
-                        muted,
-                        Layout.Alignment.ALIGN_NORMAL
-                    )
-                }
+                if (specification.isNotBlank()) drawCell(specification, itemX + 7f, y + 4 + nameHeight + 1, textWidth, 8, false, muted, Layout.Alignment.ALIGN_NORMAL)
 
                 val quantity = item.quantity.toString()
                 val quantityHeight = measure(quantity, quantityWidth, 9, true, Layout.Alignment.ALIGN_CENTER)
-                drawCell(
-                    quantity,
-                    quantityX.toFloat(),
-                    y + ((rowHeight - quantityHeight) / 2),
-                    quantityWidth,
-                    9,
-                    true,
-                    navy,
-                    Layout.Alignment.ALIGN_CENTER
-                )
+                drawCell(quantity, quantityX.toFloat(), y + ((rowHeight - quantityHeight) / 2), quantityWidth, 9, true, navy, Layout.Alignment.ALIGN_CENTER)
 
                 val note = if (item.approximate) t(lang, "Approx.", "تقريباً", "نزیکەی") else ""
                 if (note.isNotBlank()) {
                     val noteHeight = measure(note, noteWidth - 6, 8, true, Layout.Alignment.ALIGN_CENTER)
-                    drawCell(
-                        note,
-                        (noteX + 3).toFloat(),
-                        y + ((rowHeight - noteHeight) / 2),
-                        noteWidth - 6,
-                        8,
-                        true,
-                        muted,
-                        Layout.Alignment.ALIGN_CENTER
-                    )
+                    drawCell(note, (noteX + 3).toFloat(), y + ((rowHeight - noteHeight) / 2), noteWidth - 6, 8, true, muted, Layout.Alignment.ALIGN_CENTER)
                 }
 
                 if (settings.showPrices) {
                     val price = item.unitPrice.ifBlank { "-" }
                     val priceHeight = measure(price, priceWidth - 8, 9, false, Layout.Alignment.ALIGN_CENTER)
-                    drawCell(
-                        price,
-                        (priceX + 4).toFloat(),
-                        y + ((rowHeight - priceHeight) / 2),
-                        priceWidth - 8,
-                        9,
-                        false,
-                        navy,
-                        Layout.Alignment.ALIGN_CENTER
-                    )
+                    drawCell(price, (priceX + 4).toFloat(), y + ((rowHeight - priceHeight) / 2), priceWidth - 8, 9, false, navy, Layout.Alignment.ALIGN_CENTER)
                 }
 
                 paint.color = border
@@ -248,10 +198,7 @@ jobs:
 
             if (settings.showEstimatedTotal) {
                 val hasAnyEnteredPrice = s.items.any { it.unitPrice.toBigDecimalOrNull() != null }
-                totalRow(
-                    t(lang, "Estimated Total", "المجموع التقديري", "کۆی خەمڵاندراو"),
-                    if (hasAnyEnteredPrice) "${s.estimatedTotal.stripTrailingZeros()} ${s.currency}" else "-"
-                )
+                totalRow(t(lang, "Estimated Total", "المجموع التقديري", "کۆی خەمڵاندراو"), if (hasAnyEnteredPrice) "${s.estimatedTotal.stripTrailingZeros()} ${s.currency}" else "-")
             }
         }
 
@@ -276,54 +223,13 @@ jobs:
                 priceX = noteX + noteWidth
             }
             val headerHeight = 24
-
             ensure(headerHeight + 2)
             paint.color = teal
             canvas!!.drawRect(left.toFloat(), y.toFloat(), right.toFloat(), (y + headerHeight).toFloat(), paint)
-
-            drawCell(
-                t(lang, "Item / Specification", "المادة / المواصفات", "ماددە / تایبەتمەندی"),
-                (itemX + 7).toFloat(),
-                y + 5,
-                itemWidth - 14,
-                8,
-                true,
-                Color.WHITE,
-                Layout.Alignment.ALIGN_NORMAL
-            )
-            drawCell(
-                t(lang, "Qty", "الكمية", "بڕ"),
-                quantityX.toFloat(),
-                y + 5,
-                quantityWidth,
-                8,
-                true,
-                Color.WHITE,
-                Layout.Alignment.ALIGN_CENTER
-            )
-            drawCell(
-                t(lang, "Note", "ملاحظة", "تێبینی"),
-                noteX.toFloat(),
-                y + 5,
-                noteWidth,
-                8,
-                true,
-                Color.WHITE,
-                Layout.Alignment.ALIGN_CENTER
-            )
-            if (settings.showPrices) {
-                drawCell(
-                    t(lang, "Unit Price", "سعر الوحدة", "نرخی دانە"),
-                    (priceX + 4).toFloat(),
-                    y + 5,
-                    priceWidth - 8,
-                    8,
-                    true,
-                    Color.WHITE,
-                    Layout.Alignment.ALIGN_CENTER
-                )
-            }
-
+            drawCell(t(lang, "Item / Specification", "المادة / المواصفات", "ماددە / تایبەتمەندی"), (itemX + 7).toFloat(), y + 5, itemWidth - 14, 8, true, Color.WHITE, Layout.Alignment.ALIGN_NORMAL)
+            drawCell(t(lang, "Qty", "الكمية", "بڕ"), quantityX.toFloat(), y + 5, quantityWidth, 8, true, Color.WHITE, Layout.Alignment.ALIGN_CENTER)
+            drawCell(t(lang, "Note", "ملاحظة", "تێبینی"), noteX.toFloat(), y + 5, noteWidth, 8, true, Color.WHITE, Layout.Alignment.ALIGN_CENTER)
+            if (settings.showPrices) drawCell(t(lang, "Unit Price", "سعر الوحدة", "نرخی دانە"), (priceX + 4).toFloat(), y + 5, priceWidth - 8, 8, true, Color.WHITE, Layout.Alignment.ALIGN_CENTER)
             paint.color = Color.argb(90, 255, 255, 255)
             if (rtl) {
                 canvas!!.drawLine(itemX.toFloat(), y.toFloat(), itemX.toFloat(), (y + headerHeight).toFloat(), paint)
@@ -341,14 +247,11 @@ jobs:
           t=t[:start]+replacement+t[end:]
           pdf.write_text(t)
 
-          # ----- Version -----
           build=root/'app/build.gradle.kts'
           t=build.read_text()
-          assert 'versionCode = 45' in t, 'Expected RC11 versionCode missing'
-          assert 'versionName = "5.0.0-rc11"' in t, 'Expected RC11 versionName missing'
-          t=t.replace('versionCode = 45','versionCode = 46',1)
-          t=t.replace('versionName = "5.0.0-rc11"','versionName = "5.0.0-rc12"',1)
-          build.write_text(t)
+          assert 'versionCode = 45' in t
+          assert 'versionName = "5.0.0-rc11"' in t
+          build.write_text(t.replace('versionCode = 45','versionCode = 46',1).replace('versionName = "5.0.0-rc11"','versionName = "5.0.0-rc12"',1))
           PY
 
           grep -Fq 'contentWindowInsets = WindowInsets.safeDrawing' "$APP"
@@ -363,22 +266,18 @@ jobs:
           grep -Fq 'val quantity = item.quantity.toString()' "$PDF"
           grep -Fq 'versionCode = 46' "$BUILD"
           grep -Fq 'versionName = "5.0.0-rc12"' "$BUILD"
-
           cat build-input/v5_language_fix/preview-test-keystore.b64 | base64 -d > /tmp/igp-preview-test.jks
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
       - uses: android-actions/setup-android@v3
-
       - name: Install Android SDK 36
         shell: bash
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
-
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.4.1'
@@ -417,6 +316,7 @@ jobs:
           retention-days: 7
 
       - name: Publish RC12 APK and source
+        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           mkdir -p build-output
