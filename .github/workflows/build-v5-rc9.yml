@@ -1,4 +1,5 @@
 name: Build IGP RC9
+# Trigger: system/phase checkmark-under-label + catalog add/edit
 
 on:
   push:
@@ -23,6 +24,7 @@ jobs:
         run: |
           set -euo pipefail
           cat build-input/v5_pdf_fix/source.b64.part* | base64 -d > /tmp/igp-source.zip
+          rm -rf /tmp/igp-build
           mkdir -p /tmp/igp-build
           unzip -q /tmp/igp-source.zip -d /tmp/igp-build || true
           SRC=/tmp/igp-build/IGP/app/src
@@ -39,7 +41,7 @@ jobs:
           tar -xzf /tmp/rc4-overlay.tar.gz -C /tmp/igp-build/IGP
 
           python - <<'PY'
-          import base64, zlib
+          import base64, zlib, hashlib
           from pathlib import Path
           repo=Path.cwd(); root=Path('/tmp/igp-build/IGP')
           mapping={
@@ -49,9 +51,17 @@ jobs:
             repo/'build-input/v5_rc8_fix/PdfExporter.z9.b64': root/'app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt',
             repo/'build-input/v5_rc9_fix/CatalogScreen.z9.b64': root/'app/src/main/java/com/infinitygreenpower/organizerform/feature/catalog/CatalogScreen.kt',
           }
+          expected={
+            'FormScreen.kt':'412155511cc61f602c30786b8cc44062d4f84f1ce89b069a5f2ead2fa3328555',
+            'CatalogScreen.kt':'4d0ec5808c24d4f8c11834a0e8ad33d134659a79d25bc7bead24c2016b7341a7',
+          }
           for src,dst in mapping.items():
+            data=zlib.decompress(base64.b64decode(src.read_bytes()))
             dst.parent.mkdir(parents=True,exist_ok=True)
-            dst.write_bytes(zlib.decompress(base64.b64decode(src.read_bytes())))
+            dst.write_bytes(data)
+            if dst.name in expected:
+              actual=hashlib.sha256(data).hexdigest()
+              assert actual==expected[dst.name], (dst.name,actual)
 
           dao=root/'app/src/main/java/com/infinitygreenpower/organizerform/data/db/Daos.kt'
           t=dao.read_text()
@@ -61,9 +71,7 @@ jobs:
           dao.write_text(t)
 
           build=root/'app/build.gradle.kts'
-          t=build.read_text()
-          t=t.replace('versionCode = 38','versionCode = 43')
-          t=t.replace('versionName = "5.0.0-rc4"','versionName = "5.0.0-rc9"')
+          t=build.read_text().replace('versionCode = 38','versionCode = 43').replace('versionName = "5.0.0-rc4"','versionName = "5.0.0-rc9"')
           build.write_text(t)
           PY
 
@@ -85,7 +93,6 @@ jobs:
           grep -Fq 'restoreState = destination != Destination.Saved' "$APP"
           grep -Fq 'if(selected) "✓" else " "' "$SETTINGS"
           grep -Fq 'versionCode = 43' /tmp/igp-build/IGP/app/build.gradle.kts
-          grep -Fq 'versionName = "5.0.0-rc9"' /tmp/igp-build/IGP/app/build.gradle.kts
 
       - uses: actions/setup-java@v4
         with:
@@ -95,7 +102,6 @@ jobs:
       - uses: android-actions/setup-android@v3
 
       - name: Install Android SDK 36
-        shell: bash
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
@@ -106,7 +112,6 @@ jobs:
 
       - name: Build RC9 APK
         working-directory: /tmp/igp-build/IGP
-        shell: bash
         env:
           IGP_PREVIEW_KEYSTORE: /tmp/igp-preview-test.jks
           IGP_PREVIEW_STORE_PASSWORD: IGPPreview2026!
@@ -139,7 +144,6 @@ jobs:
           retention-days: 7
 
       - name: Publish APK
-        shell: bash
         run: |
           mkdir -p build-output
           cp IGP-Organizer-Form-5.0.0-rc9-Catalog-Controls-Fix.apk build-output/
