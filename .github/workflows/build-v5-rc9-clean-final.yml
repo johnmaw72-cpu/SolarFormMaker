@@ -1,0 +1,135 @@
+name: Build IGP RC9 Clean Final
+
+on:
+  push:
+    branches: [chatgpt-v5-pdf-fix-build]
+    paths: ['.github/workflows/build-v5-rc9-clean-final.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish run id
+        run: |
+          mkdir -p build-output
+          echo "${GITHUB_RUN_ID}" > build-output/rc9-clean-final-run-id.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add build-output/rc9-clean-final-run-id.txt
+          git commit -m 'Publish RC9 clean final run id' || true
+          git push || true
+
+      - name: Reconstruct verified RC9 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat build-input/v5_pdf_fix/source.b64.part* | base64 -d > /tmp/igp-source.zip
+          rm -rf /tmp/igp-build && mkdir -p /tmp/igp-build
+          unzip -q /tmp/igp-source.zip -d /tmp/igp-build || true
+          ROOT=/tmp/igp-build/IGP
+          SRC=$ROOT/app/src
+          mkdir -p "$SRC/main"
+          for DIR in java res assets; do [ -d "$SRC/$DIR" ] && cp -a "$SRC/$DIR" "$SRC/main/" || true; done
+          [ -f "$SRC/AndroidManifest.xml" ] && cp "$SRC/AndroidManifest.xml" "$SRC/main/AndroidManifest.xml" || true
+          cp build-input/v5_pdf_fix/Relations.kt "$SRC/main/java/com/infinitygreenpower/organizerform/data/db/Relations.kt"
+          cat build-input/v5_language_fix/overlay.b64.part* | base64 -d > /tmp/rc3-overlay.tar.gz
+          tar -xzf /tmp/rc3-overlay.tar.gz -C "$ROOT"
+          cat build-input/v5_rc4_fix/overlay.b64.part* | base64 -d > /tmp/rc4-overlay.tar.gz
+          tar -xzf /tmp/rc4-overlay.tar.gz -C "$ROOT"
+
+          BASE=build-input/v5_rc10_fix
+          PKG=$SRC/main/java/com/infinitygreenpower/organizerform
+          cp "$BASE/FormModels.kt" "$PKG/feature/form/FormModels.kt"
+          cp "$BASE/FormViewModel.kt" "$PKG/feature/form/FormViewModel.kt"
+          cp "$BASE/FormScreen.kt" "$PKG/feature/form/FormScreen.kt"
+          cp "$BASE/CatalogScreen.kt" "$PKG/feature/catalog/CatalogScreen.kt"
+          cp "$BASE/PdfExporter.kt" "$PKG/export/pdf/PdfExporter.kt"
+          cp "$BASE/FormExportModel.kt" "$PKG/export/json/FormExportModel.kt"
+          cp "$BASE/Daos.kt" "$PKG/data/db/Daos.kt"
+          cp "$BASE/IGPOrganizerApp.kt" "$PKG/app/IGPOrganizerApp.kt"
+          cp "$BASE/SettingsScreen.kt" "$PKG/feature/settings/SettingsScreen.kt"
+
+          python - <<'PY'
+          from pathlib import Path
+          build=Path('/tmp/igp-build/IGP/app/build.gradle.kts')
+          t=build.read_text().replace('versionCode = 38','versionCode = 43').replace('versionName = "5.0.0-rc4"','versionName = "5.0.0-rc9"')
+          build.write_text(t)
+          PY
+
+          sed -i 's#<string name="app_name">IGP Organizer Form</string>#<string name="app_name">IGP Organizer Form Preview</string>#' "$SRC/main/res/values/strings.xml"
+          sed -i 's#<string name="app_name">استمارة منظم IGP</string>#<string name="app_name">استمارة منظم IGP - تجريبي</string>#' "$SRC/main/res/values-ar/strings.xml"
+          sed -i 's#<string name="app_name">فۆرمی ڕێکخەری IGP</string>#<string name="app_name">فۆرمی ڕێکخەری IGP - تاقیکردنەوە</string>#' "$SRC/main/res/values-b+ckb/strings.xml"
+          cat build-input/v5_language_fix/preview-test-keystore.b64 | base64 -d > /tmp/igp-preview-test.jks
+
+          grep -Fq 'selected = isSelected' "$PKG/feature/form/FormScreen.kt"
+          grep -Fq 'if (isSelected) "✓" else " "' "$PKG/feature/form/FormScreen.kt"
+          grep -Fq 'Add Catalog Item' "$PKG/feature/catalog/CatalogScreen.kt"
+          grep -Fq 'Edit Catalog Item' "$PKG/feature/catalog/CatalogScreen.kt"
+          grep -Fq 'suspend fun upsert(item: CatalogItemEntity)' "$PKG/data/db/Daos.kt"
+          grep -Fq 'restoreState = destination != Destination.Saved' "$PKG/app/IGPOrganizerApp.kt"
+          grep -Fq 'versionCode = 43' "$ROOT/app/build.gradle.kts"
+          grep -Fq 'versionName = "5.0.0-rc9"' "$ROOT/app/build.gradle.kts"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 36
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Build RC9 APK
+        working-directory: /tmp/igp-build/IGP
+        env:
+          IGP_PREVIEW_KEYSTORE: /tmp/igp-preview-test.jks
+          IGP_PREVIEW_STORE_PASSWORD: IGPPreview2026!
+          IGP_PREVIEW_KEY_ALIAS: igp-preview
+          IGP_PREVIEW_KEY_PASSWORD: IGPPreview2026!
+        run: gradle --no-daemon clean assembleDebug
+
+      - name: Verify RC9 APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=/tmp/igp-build/IGP/app/build/outputs/apk/debug/app-debug.apk
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          BADGING=$("$AAPT" dump badging "$APK" | head -n 1)
+          echo "$BADGING"
+          echo "$BADGING" | grep "name='com.infinitygreenpower.offerstudio.preview'"
+          echo "$BADGING" | grep "versionCode='43'"
+          echo "$BADGING" | grep "versionName='5.0.0-rc9-test'"
+          "$APKSIGNER" verify --print-certs "$APK" | tee /tmp/signing.txt
+          grep -qi '1f83a683d692d6530df5ba8e4ba1892e18bb11a313c5f744b464f3bf003c06f0' /tmp/signing.txt
+          unzip -t "$APK" >/dev/null
+          cp "$APK" IGP-Organizer-Form-5.0.0-rc9-Catalog-Controls-Fix.apk
+          sha256sum IGP-Organizer-Form-5.0.0-rc9-Catalog-Controls-Fix.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IGP-Organizer-Form-5.0.0-rc9-Clean-Final-APK
+          path: IGP-Organizer-Form-5.0.0-rc9-Catalog-Controls-Fix.apk
+          retention-days: 7
+
+      - name: Publish APK
+        run: |
+          mkdir -p build-output
+          cp IGP-Organizer-Form-5.0.0-rc9-Catalog-Controls-Fix.apk build-output/
+          git pull --rebase origin chatgpt-v5-pdf-fix-build || true
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add build-output/IGP-Organizer-Form-5.0.0-rc9-Catalog-Controls-Fix.apk
+          git commit -m 'Publish v5.0.0-rc9 catalog controls APK' || true
+          git push || true
