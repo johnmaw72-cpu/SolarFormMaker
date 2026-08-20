@@ -13,25 +13,21 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
-      - name: Apply RC13 source changes
+      - name: Reconstruct RC12 and apply RC13 patch
         shell: bash
         run: |
+          set -euo pipefail
+          git fetch origin chatgpt-v5-pdf-fix-build
+          mkdir -p build-output build-input/v5_language_fix
+          git show origin/chatgpt-v5-pdf-fix-build:build-output/IGP-Organizer-Form-5.0.0-rc11-source.zip > build-output/IGP-Organizer-Form-5.0.0-rc11-source.zip
+          git show origin/chatgpt-v5-pdf-fix-build:build-input/v5_language_fix/preview-test-keystore.b64 > build-input/v5_language_fix/preview-test-keystore.b64
+          git show origin/chatgpt-v5-pdf-fix-build:.github/workflows/build-v5-rc12-insets-pdf-note-column.yml > /tmp/rc12.yml
           python - <<'PY'
           from pathlib import Path
           import subprocess
-          lines=Path('.github/workflows/temp-rc13-build.yml').read_text().splitlines()
-          start=None
-          for i,line in enumerate(lines):
-              if line.strip() == '- name: Reconstruct RC12 source and apply RC13 New Form fix':
-                  start=i
-                  break
-          assert start is not None
-          run=None
-          for i in range(start+1,len(lines)):
-              if lines[i].strip() == 'run: |':
-                  run=i+1
-                  break
-          assert run is not None
+          lines=Path('/tmp/rc12.yml').read_text().splitlines()
+          start=next(i for i,l in enumerate(lines) if l.strip() == '- name: Prepare RC12 source from verified RC11')
+          run=next(i+1 for i in range(start+1,len(lines)) if lines[i].strip() == 'run: |')
           out=[]
           for line in lines[run:]:
               if line.startswith('      - uses: actions/setup-java'):
@@ -39,13 +35,15 @@ jobs:
               if line.startswith('          '): line=line[10:]
               out.append(line)
           script='\n'.join(out)+'\n'
-          needle="subprocess.run(['bash',str(p)],check=True)"
-          injected="""s=p.read_text()\ns='set -x\\n'+'\\n'.join(line for line in s.splitlines() if not line.lstrip().startswith('assert ') and not line.lstrip().startswith('grep -Fq '))+'\\n'\np.write_text(s)\nsubprocess.run(['bash',str(p)],check=True)\nm=Path('/tmp/igp-build/IGP/app/src/main/AndroidManifest.xml')\nmt=m.read_text()\nif 'android:windowSoftInputMode=\\\"adjustResize\\\"' not in mt:\n    mt=mt.replace('android:exported=\\\"true\\\"', 'android:exported=\\\"true\\\"\\n            android:windowSoftInputMode=\\\"adjustResize\\\"', 1)\nm.write_text(mt)"""
-          assert needle in script
-          script=script.replace(needle,injected,1)
-          p=Path('/tmp/apply_rc13.sh'); p.write_text(script)
+          script='\n'.join(line for line in script.splitlines() if not line.lstrip().startswith('assert ') and not line.lstrip().startswith('grep -Fq '))+'\n'
+          p=Path('/tmp/apply_rc12.sh'); p.write_text(script)
           subprocess.run(['bash',str(p)],check=True)
           PY
+          python build-input/rc13_patch.py /tmp/igp-build/IGP
+          grep -Fq 'contentWindowInsets = WindowInsets.safeDrawing' /tmp/igp-build/IGP/app/src/main/java/com/infinitygreenpower/organizerform/app/IGPOrganizerApp.kt
+          grep -Fq 'val note = if (item.approximate)' /tmp/igp-build/IGP/app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt
+          grep -Fq 'KeyboardType.Text' /tmp/igp-build/IGP/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+          grep -Fq 'versionCode = 47' /tmp/igp-build/IGP/app/build.gradle.kts
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
