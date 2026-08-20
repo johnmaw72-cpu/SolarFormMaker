@@ -1,0 +1,45 @@
+name: Diagnose RC10 overlays
+on:
+  push:
+    branches: [chatgpt-v5-pdf-fix-build]
+    paths: ['.github/workflows/diagnose-rc10-overlays.yml']
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check compressed overlays
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64,zlib
+          from pathlib import Path
+          files=[
+            'build-input/v5_rc10_fix/FormScreen.z9.b64',
+            'build-input/v5_rc8_fix/IGPOrganizerApp.z9.b64',
+            'build-input/v5_rc8_fix/SettingsScreen.z9.b64',
+            'build-input/v5_rc8_fix/PdfExporter.z9.b64',
+            'build-input/v5_rc9_fix/CatalogScreen.z9.b64',
+          ]
+          lines=[]
+          for f in files:
+            p=Path(f)
+            try:
+              raw=p.read_bytes(); dec=base64.b64decode(raw,validate=True); out=zlib.decompress(dec)
+              lines.append(f'OK {f} b64={len(raw)} decoded={len(out)}')
+            except Exception as e:
+              lines.append(f'FAIL {f}: {type(e).__name__}: {e}')
+          Path('rc10-overlay-diagnostic.txt').write_text('\n'.join(lines)+'\n')
+          print('\n'.join(lines))
+          PY
+      - name: Publish diagnostic
+        run: |
+          mkdir -p build-output
+          cp rc10-overlay-diagnostic.txt build-output/
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add build-output/rc10-overlay-diagnostic.txt
+          git commit -m "Publish RC10 overlay diagnostic" || true
+          git push || true
