@@ -1,0 +1,5 @@
+FAIL build-input/v5_rc10_fix/FormScreen.z9.b64: error: Error -3 while decompressing data: invalid distance too far back
+OK build-input/v5_rc8_fix/IGPOrganizerApp.z9.b64 b64=2656 decoded=7840
+OK build-input/v5_rc8_fix/SettingsScreen.z9.b64 b64=5244 decoded=11230
+OK build-input/v5_rc8_fix/PdfExporter.z9.b64 b64=9252 decoded=29659
+OK build-input/v5_rc9_fix/CatalogScreen.z9.b64 b64=5032 decoded=14780
