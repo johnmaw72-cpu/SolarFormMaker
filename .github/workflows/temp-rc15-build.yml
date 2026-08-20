@@ -50,6 +50,7 @@ jobs:
         run: |
           set -euo pipefail
           cat build-input/rc15_patch_parts/part*.b64 > /tmp/rc15.patch.gz.b64
+          sed -i 's/Qby+6oKwam9/Qby+6+oKwam9/' /tmp/rc15.patch.gz.b64
           echo '5f30cf555311e653ec6ce29666e7d744d70e34265fd8154b8b34e2b9d906b773  /tmp/rc15.patch.gz.b64' | sha256sum -c -
           base64 -d /tmp/rc15.patch.gz.b64 | gzip -d > /tmp/rc15.raw.patch
           echo '380d4d708cdb8810f2f5325ec0e8a40bc542cb43804748b3755c9a9baf90401b  /tmp/rc15.raw.patch' | sha256sum -c -
