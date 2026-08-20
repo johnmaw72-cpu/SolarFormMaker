@@ -1,0 +1,209 @@
+name: Apply IGP RC10 Form Enhancements
+
+on:
+  push:
+    branches: [chatgpt-v5-pdf-fix-build]
+    paths: ['.github/workflows/apply-v5-rc10-form-enhancements.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          root=Path('build-input/v5_rc10_fix')
+
+          # FormModels: persistable per-item approximate flag + reusable standard notes helper.
+          p=root/'FormModels.kt'; t=p.read_text()
+          old='''    val specification: String = "",
+    val quantity: Int = 1,
+    val unitPrice: String = ""
+'''
+          new='''    val specification: String = "",
+    val quantity: Int = 1,
+    val approximate: Boolean = false,
+    val unitPrice: String = ""
+'''
+          assert old in t
+          t=t.replace(old,new,1)
+          anchor='''fun generatedLoadNote(state: FormUiState, language: String): String {
+'''
+          helper='''const val STANDARD_NOTE_AC = "لا یشمل مواد واعمال AC"
+const val STANDARD_NOTE_CIVIL = "لا یشمل اعمال مدنیة ان وجدت"
+
+fun addStandardExclusionNotes(current: String): String {
+    val missing = listOf(STANDARD_NOTE_AC, STANDARD_NOTE_CIVIL).filterNot { current.contains(it) }
+    if (missing.isEmpty()) return current
+    val prefix = current.trimEnd()
+    val addition = missing.joinToString("\\n") { "- $it" }
+    return if (prefix.isBlank()) addition else "$prefix\\n$addition"
+}
+
+'''
+          assert anchor in t
+          t=t.replace(anchor,helper+anchor,1)
+          p.write_text(t)
+
+          # FormViewModel: preserve approximate through custom item creation and existing Room quantity field.
+          p=root/'FormViewModel.kt'; t=p.read_text()
+          old='''    fun addCustom(name: String, category: String, quantity: Int, price: String) {
+        update {
+            copy(items = items + DraftItem(
+                name = name.ifBlank { "Custom item" },
+                category = category.ifBlank { "Custom" },
+                quantity = quantity.coerceAtLeast(1),
+                unitPrice = price
+            ))
+        }
+    }
+'''
+          new='''    fun addCustom(name: String, category: String, quantity: Int, price: String, approximate: Boolean = false) {
+        update {
+            copy(items = items + DraftItem(
+                name = name.ifBlank { "Custom item" },
+                category = category.ifBlank { "Custom" },
+                quantity = quantity.coerceAtLeast(1),
+                approximate = approximate,
+                unitPrice = price
+            ))
+        }
+    }
+'''
+          assert old in t
+          t=t.replace(old,new,1)
+          old='''                    item.quantity.toString(), item.unitPrice.ifBlank { null }, snapshot.currency, index
+'''
+          new='''                    ((if (item.approximate) "~" else "") + item.quantity.toString()), item.unitPrice.ifBlank { null }, snapshot.currency, index
+'''
+          assert old in t
+          t=t.replace(old,new,1)
+          old='''        DraftItem(
+            it.id, it.catalogItemId, it.itemNameSnapshot, it.categorySnapshot,
+            it.specificationSnapshot, it.quantity.toIntOrNull() ?: 1, it.unitPrice.orEmpty()
+        )
+'''
+          new='''        DraftItem(
+            id = it.id,
+            catalogId = it.catalogItemId,
+            name = it.itemNameSnapshot,
+            category = it.categorySnapshot,
+            specification = it.specificationSnapshot,
+            quantity = it.quantity.removePrefix("~").toIntOrNull() ?: 1,
+            approximate = it.quantity.startsWith("~"),
+            unitPrice = it.unitPrice.orEmpty()
+        )
+'''
+          assert old in t
+          t=t.replace(old,new,1)
+          p.write_text(t)
+
+          # FormScreen: quick approximate toggle, editor option, standard notes button, preview labeling.
+          p=root/'FormScreen.kt'; t=p.read_text()
+          old='''vm.addCustom(item.name, item.category, item.quantity, item.unitPrice)'''
+          new='''vm.addCustom(item.name, item.category, item.quantity, item.unitPrice, item.approximate)'''
+          assert old in t
+          t=t.replace(old,new,1)
+
+          old='''Text(x.category,color=Muted,fontSize=12.sp); Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween)'''
+          new='''Text(x.category,color=Muted,fontSize=12.sp); FilterChip(selected=x.approximate,onClick={vm.updateItem(x.copy(approximate=!x.approximate))},label={Text(tr(lang,"Approx.","تقريباً","نزیکەی"))}); Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween)'''
+          assert old in t
+          t=t.replace(old,new,1)
+
+          old='''Text("${x.quantity}",fontWeight=FontWeight.Bold)'''
+          new='''Text(if(x.approximate) "${tr(lang,"Approx.","تقريباً","نزیکەی")} ${x.quantity}" else "${x.quantity}",fontWeight=FontWeight.Bold)'''
+          assert old in t
+          t=t.replace(old,new,1)
+
+          old='''s.items.forEach{Summary(it.name,"${it.quantity} × ${it.unitPrice.ifBlank{"—"}}")}
+'''
+          new='''s.items.forEach{Summary(it.name,"${if(it.approximate) tr(lang,"Approx.","تقريباً","نزیکەی")+" " else ""}${it.quantity} × ${it.unitPrice.ifBlank{"—"}}")}
+'''
+          assert old in t
+          t=t.replace(old,new,1)
+
+          old='''Field(s.customNote,{v->vm.update{copy(customNote=v)}},tr(lang,"Custom note (optional)","ملاحظة مخصصة (اختياري)","تێبینی تایبەت"),false,singleLine=false) } }
+'''
+          new='''Field(s.customNote,{v->vm.update{copy(customNote=v)}},tr(lang,"Custom note (optional)","ملاحظة مخصصة (اختياري)","تێبینی تایبەت"),false,singleLine=false); OutlinedButton({vm.update{copy(customNote=addStandardExclusionNotes(customNote))}},Modifier.fillMaxWidth().padding(top=6.dp)){Icon(Icons.Outlined.Add,null);Text(tr(lang,"Add AC & civil-work exclusions","إضافة ملاحظات AC والأعمال المدنية","زیادکردنی تێبینی AC و کاری مەدەنی"))} } }
+'''
+          assert old in t
+          t=t.replace(old,new,1)
+
+          old='''Field(item.quantity.toString(),{item=item.copy(quantity=it.toIntOrNull()?.coerceAtLeast(1)?:1)},tr(lang,"Quantity","الكمية","بڕ"),keyboard=KeyboardType.Number);Field(item.unitPrice'''
+          new='''Field(item.quantity.toString(),{item=item.copy(quantity=it.toIntOrNull()?.coerceAtLeast(1)?:1)},tr(lang,"Quantity","الكمية","بڕ"),keyboard=KeyboardType.Number);Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){Checkbox(item.approximate,{item=item.copy(approximate=it)});Text(tr(lang,"Approximate quantity (Approx.)","الكمية تقريباً","بڕ بە نزیکەیی"))};Field(item.unitPrice'''
+          assert old in t
+          t=t.replace(old,new,1)
+          p.write_text(t)
+
+          # PDF: wider quantity column and localized approximate wording.
+          p=root/'PdfExporter.kt'; t=p.read_text()
+          old='''                val itemWidth = if (settings.showPrices) 365 else 455
+                val quantityWidth = 60
+'''
+          new='''                val itemWidth = if (settings.showPrices) 347 else 437
+                val quantityWidth = 78
+'''
+          assert t.count(old)==1
+          t=t.replace(old,new,1)
+          old='''            val itemWidth = if (settings.showPrices) 365 else 455
+            val quantityWidth = 60
+'''
+          new='''            val itemWidth = if (settings.showPrices) 347 else 437
+            val quantityWidth = 78
+'''
+          assert t.count(old)==1
+          t=t.replace(old,new,1)
+          old='''                val quantity = item.quantity.toString()
+'''
+          new='''                val quantity = if (item.approximate) "${t(lang, "Approx.", "تقريباً", "نزیکەی")} ${item.quantity}" else item.quantity.toString()
+'''
+          assert old in t
+          t=t.replace(old,new,1)
+          old='''                    it.quantity.toString(),
+                    it.unitPrice.ifBlank { null },
+'''
+          new='''                    it.quantity.toString(),
+                    it.approximate,
+                    it.unitPrice.ifBlank { null },
+'''
+          assert old in t
+          t=t.replace(old,new,1)
+          p.write_text(t)
+
+          # JSON: explicit approximate flag for downstream use.
+          p=root/'FormExportModel.kt'; t=p.read_text()
+          old='''data class ExportItem(val catalogId: String?, val category: String, val name: String, val quantity: String, val unitPrice: String?, val currency: String, val lineTotal: String?)'''
+          new='''data class ExportItem(val catalogId: String?, val category: String, val name: String, val quantity: String, val approximate: Boolean, val unitPrice: String?, val currency: String, val lineTotal: String?)'''
+          assert old in t
+          t=t.replace(old,new,1)
+          old='''.put("quantity", item.quantity).put("unit_price", item.unitPrice ?: JSONObject.NULL)'''
+          new='''.put("quantity", item.quantity).put("approximate", item.approximate).put("unit_price", item.unitPrice ?: JSONObject.NULL)'''
+          assert old in t
+          t=t.replace(old,new,1)
+          p.write_text(t)
+          PY
+
+          grep -Fq 'val approximate: Boolean = false' build-input/v5_rc10_fix/FormModels.kt
+          grep -Fq 'STANDARD_NOTE_AC' build-input/v5_rc10_fix/FormModels.kt
+          grep -Fq 'item.quantity.startsWith("~")' build-input/v5_rc10_fix/FormViewModel.kt
+          grep -Fq 'Add AC & civil-work exclusions' build-input/v5_rc10_fix/FormScreen.kt
+          grep -Fq 'FilterChip(selected=x.approximate' build-input/v5_rc10_fix/FormScreen.kt
+          grep -Fq 'item.approximate' build-input/v5_rc10_fix/PdfExporter.kt
+          grep -Fq 'put("approximate", item.approximate)' build-input/v5_rc10_fix/FormExportModel.kt
+
+      - name: Commit RC10 source enhancements
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add build-input/v5_rc10_fix
+          git commit -m 'Add standard notes and approximate item support' || true
+          git push || true
