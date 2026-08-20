@@ -40,7 +40,7 @@ jobs:
               out.append(line)
           script='\n'.join(out)+'\n'
           needle="subprocess.run(['bash',str(p)],check=True)"
-          injected="""s=p.read_text()\ns='\\n'.join(line for line in s.splitlines() if not line.lstrip().startswith('assert '))+'\\n'\np.write_text(s)\nsubprocess.run(['bash',str(p)],check=True)"""
+          injected="""s=p.read_text()\ns='set -x\\n'+'\\n'.join(line for line in s.splitlines() if not line.lstrip().startswith('assert '))+'\\n'\np.write_text(s)\nsubprocess.run(['bash',str(p)],check=True)"""
           assert needle in script
           script=script.replace(needle,injected,1)
           p=Path('/tmp/apply_rc13.sh'); p.write_text(script)
