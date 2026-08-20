@@ -1,0 +1,72 @@
+name: Export RC9 edit source
+
+on:
+  push:
+    branches:
+      - chatgpt-v5-pdf-fix-build
+    paths:
+      - '.github/workflows/export-rc9-edit-source.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct current source and publish editable files
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat build-input/v5_pdf_fix/source.b64.part* | base64 -d > /tmp/igp-source.zip
+          rm -rf /tmp/igp-build && mkdir -p /tmp/igp-build
+          unzip -q /tmp/igp-source.zip -d /tmp/igp-build || true
+          SRC=/tmp/igp-build/IGP/app/src
+          mkdir -p "$SRC/main"
+          for DIR in java res assets; do [ -d "$SRC/$DIR" ] && cp -a "$SRC/$DIR" "$SRC/main/" || true; done
+          [ -f "$SRC/AndroidManifest.xml" ] && cp "$SRC/AndroidManifest.xml" "$SRC/main/AndroidManifest.xml" || true
+          cp build-input/v5_pdf_fix/Relations.kt "$SRC/main/java/com/infinitygreenpower/organizerform/data/db/Relations.kt"
+          cat build-input/v5_language_fix/overlay.b64.part* | base64 -d > /tmp/rc3-overlay.tar.gz
+          tar -xzf /tmp/rc3-overlay.tar.gz -C /tmp/igp-build/IGP
+          cat build-input/v5_rc4_fix/overlay.b64.part* | base64 -d > /tmp/rc4-overlay.tar.gz
+          tar -xzf /tmp/rc4-overlay.tar.gz -C /tmp/igp-build/IGP
+          python - <<'PY'
+          import base64,zlib
+          from pathlib import Path
+          repo=Path.cwd(); root=Path('/tmp/igp-build/IGP')
+          mapping={
+            repo/'build-input/v5_rc9_fix/FormScreen.z9.b64': root/'app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt',
+            repo/'build-input/v5_rc8_fix/IGPOrganizerApp.z9.b64': root/'app/src/main/java/com/infinitygreenpower/organizerform/app/IGPOrganizerApp.kt',
+            repo/'build-input/v5_rc8_fix/SettingsScreen.z9.b64': root/'app/src/main/java/com/infinitygreenpower/organizerform/feature/settings/SettingsScreen.kt',
+            repo/'build-input/v5_rc8_fix/PdfExporter.z9.b64': root/'app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt',
+            repo/'build-input/v5_rc9_fix/CatalogScreen.z9.b64': root/'app/src/main/java/com/infinitygreenpower/organizerform/feature/catalog/CatalogScreen.kt',
+          }
+          for src,dst in mapping.items():
+            dst.parent.mkdir(parents=True,exist_ok=True)
+            dst.write_bytes(zlib.decompress(base64.b64decode(src.read_bytes())))
+          dao=root/'app/src/main/java/com/infinitygreenpower/organizerform/data/db/Daos.kt'
+          t=dao.read_text()
+          needle='@Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertSeed(items: List<CatalogItemEntity>): List<Long>'
+          if 'suspend fun upsert(item: CatalogItemEntity)' not in t:
+            t=t.replace(needle, needle+'\n    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(item: CatalogItemEntity)')
+          dao.write_text(t)
+          PY
+          OUT="$GITHUB_WORKSPACE/build-output/rc9-edit-source"
+          rm -rf "$OUT" && mkdir -p "$OUT"
+          BASE="$SRC/main/java/com/infinitygreenpower/organizerform"
+          cp "$BASE/feature/form/FormScreen.kt" "$OUT/"
+          cp "$BASE/feature/form/FormModels.kt" "$OUT/"
+          cp "$BASE/feature/form/FormViewModel.kt" "$OUT/"
+          cp "$BASE/data/db/Entities.kt" "$OUT/"
+          cp "$BASE/data/db/OrganizerDatabase.kt" "$OUT/"
+          cp "$BASE/data/db/Daos.kt" "$OUT/"
+          cp "$BASE/export/pdf/PdfExporter.kt" "$OUT/"
+          cp "$BASE/export/json/FormExportModel.kt" "$OUT/"
+          cp "$BASE/feature/catalog/CatalogScreen.kt" "$OUT/"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add build-output/rc9-edit-source
+          git commit -m "Export RC9 editable source files" || exit 0
+          git push
