@@ -1,0 +1,117 @@
+name: Build IGP RC8
+
+on:
+  push:
+    branches:
+      - chatgpt-v5-pdf-fix-build
+    paths:
+      - '.github/workflows/build-v5-rc8.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct RC8 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat build-input/v5_pdf_fix/source.b64.part* | base64 -d > /tmp/igp-source.zip
+          mkdir -p /tmp/igp-build
+          unzip -q /tmp/igp-source.zip -d /tmp/igp-build || true
+          SRC=/tmp/igp-build/IGP/app/src
+          mkdir -p "$SRC/main"
+          for DIR in java res assets; do
+            if [ -d "$SRC/$DIR" ]; then cp -a "$SRC/$DIR" "$SRC/main/"; fi
+          done
+          if [ -f "$SRC/AndroidManifest.xml" ]; then cp "$SRC/AndroidManifest.xml" "$SRC/main/AndroidManifest.xml"; fi
+          cp build-input/v5_pdf_fix/Relations.kt "$SRC/main/java/com/infinitygreenpower/organizerform/data/db/Relations.kt"
+
+          cat build-input/v5_language_fix/overlay.b64.part* | base64 -d > /tmp/rc3-overlay.tar.gz
+          tar -xzf /tmp/rc3-overlay.tar.gz -C /tmp/igp-build/IGP
+          cat build-input/v5_rc4_fix/overlay.b64.part* | base64 -d > /tmp/rc4-overlay.tar.gz
+          tar -xzf /tmp/rc4-overlay.tar.gz -C /tmp/igp-build/IGP
+
+          python - <<'PY'
+          import base64,zlib
+          from pathlib import Path
+          repo=Path.cwd(); root=Path('/tmp/igp-build/IGP')
+          mapping={
+            repo/'build-input/v5_rc6_fix/FormScreen.z9.b64': root/'app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt',
+            repo/'build-input/v5_rc8_fix/IGPOrganizerApp.z9.b64': root/'app/src/main/java/com/infinitygreenpower/organizerform/app/IGPOrganizerApp.kt',
+            repo/'build-input/v5_rc8_fix/SettingsScreen.z9.b64': root/'app/src/main/java/com/infinitygreenpower/organizerform/feature/settings/SettingsScreen.kt',
+            repo/'build-input/v5_rc8_fix/PdfExporter.z9.b64': root/'app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt',
+          }
+          for src,dst in mapping.items():
+            dst.parent.mkdir(parents=True,exist_ok=True)
+            dst.write_bytes(zlib.decompress(base64.b64decode(src.read_bytes())))
+          build=root/'app/build.gradle.kts'
+          t=build.read_text()
+          t=t.replace('versionCode = 38','versionCode = 42').replace('versionName = "5.0.0-rc4"','versionName = "5.0.0-rc8"')
+          build.write_text(t)
+          PY
+
+          sed -i 's#<string name="app_name">IGP Organizer Form</string>#<string name="app_name">IGP Organizer Form Preview</string>#' "$SRC/main/res/values/strings.xml"
+          sed -i 's#<string name="app_name">استمارة منظم IGP</string>#<string name="app_name">استمارة منظم IGP - تجريبي</string>#' "$SRC/main/res/values-ar/strings.xml"
+          sed -i 's#<string name="app_name">فۆرمی ڕێکخەری IGP</string>#<string name="app_name">فۆرمی ڕێکخەری IGP - تاقیکردنەوە</string>#' "$SRC/main/res/values-b+ckb/strings.xml"
+          cat build-input/v5_language_fix/preview-test-keystore.b64 | base64 -d > /tmp/igp-preview-test.jks
+          grep -Fq 'versionCode = 42' /tmp/igp-build/IGP/app/build.gradle.kts
+          grep -Fq 'versionName = "5.0.0-rc8"' /tmp/igp-build/IGP/app/build.gradle.kts
+          grep -Fq 'restoreState = destination != Destination.Saved' "$SRC/main/java/com/infinitygreenpower/organizerform/app/IGPOrganizerApp.kt"
+          grep -Fq 'if(selected) "✓" else " "' "$SRC/main/java/com/infinitygreenpower/organizerform/feature/settings/SettingsScreen.kt"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 36
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+      - name: Build RC8 APK
+        working-directory: /tmp/igp-build/IGP
+        env:
+          IGP_PREVIEW_KEYSTORE: /tmp/igp-preview-test.jks
+          IGP_PREVIEW_STORE_PASSWORD: IGPPreview2026!
+          IGP_PREVIEW_KEY_ALIAS: igp-preview
+          IGP_PREVIEW_KEY_PASSWORD: IGPPreview2026!
+        run: gradle --no-daemon clean assembleDebug
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=/tmp/igp-build/IGP/app/build/outputs/apk/debug/app-debug.apk
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          BADGING=$("$AAPT" dump badging "$APK" | head -n 1)
+          echo "$BADGING"
+          echo "$BADGING" | grep "name='com.infinitygreenpower.offerstudio.preview'"
+          echo "$BADGING" | grep "versionCode='42'"
+          echo "$BADGING" | grep "versionName='5.0.0-rc8-test'"
+          "$APKSIGNER" verify --print-certs "$APK" | tee /tmp/signing.txt
+          grep -qi '1f83a683d692d6530df5ba8e4ba1892e18bb11a313c5f744b464f3bf003c06f0' /tmp/signing.txt
+          cp "$APK" IGP-Organizer-Form-5.0.0-rc8-Saved-Language-PDF-Spacing-Fix.apk
+          sha256sum IGP-Organizer-Form-5.0.0-rc8-Saved-Language-PDF-Spacing-Fix.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IGP-Organizer-Form-5.0.0-rc8-APK
+          path: IGP-Organizer-Form-5.0.0-rc8-Saved-Language-PDF-Spacing-Fix.apk
+          retention-days: 7
+      - name: Publish APK
+        shell: bash
+        run: |
+          mkdir -p build-output
+          cp IGP-Organizer-Form-5.0.0-rc8-Saved-Language-PDF-Spacing-Fix.apk build-output/
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add build-output/IGP-Organizer-Form-5.0.0-rc8-Saved-Language-PDF-Spacing-Fix.apk
+          git commit -m "Build v5.0.0-rc8 APK" || exit 0
+          git push
