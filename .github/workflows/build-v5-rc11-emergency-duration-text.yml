@@ -1,4 +1,4 @@
-name: Build IGP RC11 Emergency Duration Text
+name: Build IGP RC12 Insets Keyboard PDF Note Column
 
 on:
   push:
@@ -20,80 +20,266 @@ jobs:
         shell: bash
         run: |
           mkdir -p build-output
-          echo "${GITHUB_RUN_ID}" > build-output/rc11-run-id.txt
+          echo "${GITHUB_RUN_ID}" > build-output/rc12-run-id.txt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add build-output/rc11-run-id.txt
-          git commit -m 'Publish RC11 run id' || true
+          git add build-output/rc12-run-id.txt
+          git commit -m 'Publish RC12 run id' || true
           git push || true
 
-      - name: Prepare RC11 source from verified RC10 final
+      - name: Prepare RC12 source from verified RC11
         shell: bash
         run: |
           set -euo pipefail
           rm -rf /tmp/igp-build
           mkdir -p /tmp/igp-build
-          unzip -q build-output/IGP-Organizer-Form-5.0.0-rc10-Final-source.zip -d /tmp/igp-build
+          unzip -q build-output/IGP-Organizer-Form-5.0.0-rc11-source.zip -d /tmp/igp-build
           ROOT=/tmp/igp-build/IGP
-          FORM="$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt"
-          BUILD="$ROOT/app/build.gradle.kts"
-          test -f "$FORM"
-          test -f "$BUILD"
+          PKG=$ROOT/app/src/main/java/com/infinitygreenpower/organizerform
+          FORM=$PKG/feature/form/FormScreen.kt
+          APP=$PKG/app/IGPOrganizerApp.kt
+          PDF=$PKG/export/pdf/PdfExporter.kt
+          MANIFEST=$ROOT/app/src/main/AndroidManifest.xml
+          BUILD=$ROOT/app/build.gradle.kts
 
           python - <<'PY'
           from pathlib import Path
+
           root=Path('/tmp/igp-build/IGP')
-          form=root/'app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt'
-          t=form.read_text()
+          pkg=root/'app/src/main/java/com/infinitygreenpower/organizerform'
 
-          old='@Composable private fun MiniField(value:String,onValue:(String)->Unit,label:String,modifier:Modifier){OutlinedTextField(value,onValue,modifier.padding(vertical=4.dp),label={Text(label,fontSize=10.sp)},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Decimal),singleLine=true)}'
-          new='@Composable private fun MiniField(value:String,onValue:(String)->Unit,label:String,modifier:Modifier,keyboard:KeyboardType=KeyboardType.Decimal){OutlinedTextField(value,onValue,modifier.padding(vertical=4.dp),label={Text(label,fontSize=10.sp)},keyboardOptions=KeyboardOptions(keyboardType=keyboard),singleLine=true)}'
-          assert old in t, 'MiniField anchor missing'
+          app=pkg/'app/IGPOrganizerApp.kt'
+          t=app.read_text()
+          if 'import androidx.compose.foundation.layout.ime\n' not in t:
+              t=t.replace('import androidx.compose.foundation.layout.fillMaxSize\n', 'import androidx.compose.foundation.layout.fillMaxSize\nimport androidx.compose.foundation.layout.ime\nimport androidx.compose.foundation.layout.safeDrawing\n', 1)
+          if 'import androidx.compose.ui.platform.LocalDensity\n' not in t:
+              t=t.replace('import androidx.compose.ui.platform.LocalContext\n', 'import androidx.compose.ui.platform.LocalContext\nimport androidx.compose.ui.platform.LocalDensity\n', 1)
+          old='''    val expanded = LocalConfiguration.current.screenWidthDp >= 600
+    val select: (Destination) -> Unit = { destination ->'''
+          new='''    val expanded = LocalConfiguration.current.screenWidthDp >= 600
+    val density = LocalDensity.current
+    val imeVisible = WindowInsets.ime.getBottom(density) > 0
+    val select: (Destination) -> Unit = { destination ->'''
+          assert old in t
           t=t.replace(old,new,1)
+          assert 'contentWindowInsets = WindowInsets(0),' in t
+          t=t.replace('contentWindowInsets = WindowInsets(0),','contentWindowInsets = WindowInsets.safeDrawing,',1)
+          assert 'if (!expanded) NavigationBar {' in t
+          t=t.replace('if (!expanded) NavigationBar {','if (!expanded && !imeVisible) NavigationBar {',1)
+          app.write_text(t)
 
-          old='MiniField(s.emergencyDuration,{v->vm.update{copy(emergencyDuration=v)}},tr(lang,"Duration","المدة","ماوە"),Modifier.weight(1f))'
-          new='MiniField(s.emergencyDuration,{v->vm.update{copy(emergencyDuration=v)}},tr(lang,"Duration","المدة","ماوە"),Modifier.weight(1f),KeyboardType.Text)'
-          assert old in t, 'Emergency duration field anchor missing'
+          manifest=root/'app/src/main/AndroidManifest.xml'
+          t=manifest.read_text()
+          old='''        <activity
+            android:name=".MainActivity"
+            android:exported="true">'''
+          new='''        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">'''
+          assert old in t
+          manifest.write_text(t.replace(old,new,1))
+
+          form=pkg/'feature/form/FormScreen.kt'
+          t=form.read_text()
+          old='''    Scaffold(
+        containerColor = AppBackground,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        bottomBar = {
+            if (state.step <= 4) FormActions(
+                step = state.step,
+                lang = lang,
+                onSave = vm::saveDraft,
+                onBack = { if (state.step > 1) vm.goTo(state.step - 1) },
+                onContinue = { if (state.step < 4) vm.goTo(state.step + 1) else vm.preview() }
+            )
+        }
+    ) { padding ->
+        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp, 48.dp, 18.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {'''
+          new='''    Scaffold(
+        containerColor = AppBackground,
+        contentWindowInsets = WindowInsets(0),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        bottomBar = {
+            if (state.step <= 4) {
+                Box(Modifier.imePadding()) {
+                    FormActions(
+                        step = state.step,
+                        lang = lang,
+                        onSave = vm::saveDraft,
+                        onBack = { if (state.step > 1) vm.goTo(state.step - 1) },
+                        onContinue = { if (state.step < 4) vm.goTo(state.step + 1) else vm.preview() }
+                    )
+                }
+            }
+        }
+    ) { padding ->
+        LazyColumn(
+            Modifier.fillMaxSize().padding(padding).imePadding(),
+            contentPadding = PaddingValues(18.dp, 20.dp, 18.dp, 20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {'''
+          assert old in t
           t=t.replace(old,new,1)
           form.write_text(t)
 
+          pdf=pkg/'export/pdf/PdfExporter.kt'
+          t=pdf.read_text()
+          start=t.index('        fun materials(s: FormUiState, settings: Settings) {')
+          end=t.index('        private fun totalRow', start)
+          replacement=r'''        fun materials(s: FormUiState, settings: Settings) {
+            section(t(lang, "Required Materials", "المواد المطلوبة", "ماددە پێویستەکان"), keepNext = 54)
+            materialHeader(settings)
+
+            s.items.forEachIndexed { index, item ->
+                val itemWidth = if (settings.showPrices) 304 else 388
+                val quantityWidth = 55
+                val noteWidth = 72
+                val priceWidth = if (settings.showPrices) 84 else 0
+                val priceX: Int
+                val noteX: Int
+                val quantityX: Int
+                val itemX: Int
+                if (rtl) {
+                    priceX = left
+                    noteX = left + priceWidth
+                    quantityX = noteX + noteWidth
+                    itemX = quantityX + quantityWidth
+                } else {
+                    itemX = left
+                    quantityX = left + itemWidth
+                    noteX = quantityX + quantityWidth
+                    priceX = noteX + noteWidth
+                }
+                val textWidth = itemWidth - 14
+                val name = "${index + 1}. ${item.name.trim()}"
+                val specification = item.specification.trim()
+                val nameHeight = measure(name, textWidth, 9, true, Layout.Alignment.ALIGN_NORMAL)
+                val specHeight = if (specification.isBlank()) 0 else measure(specification, textWidth, 8, false, Layout.Alignment.ALIGN_NORMAL)
+                val rowHeight = maxOf(28, 4 + nameHeight + (if (specHeight > 0) 1 + specHeight else 0) + 4)
+                ensure(rowHeight) { materialHeader(settings) }
+                paint.color = if (index % 2 == 0) rowTint else Color.WHITE
+                canvas!!.drawRect(left.toFloat(), y.toFloat(), right.toFloat(), (y + rowHeight).toFloat(), paint)
+                drawCell(name, itemX + 7f, y + 4, textWidth, 9, true, navy, Layout.Alignment.ALIGN_NORMAL)
+                if (specification.isNotBlank()) drawCell(specification, itemX + 7f, y + 4 + nameHeight + 1, textWidth, 8, false, muted, Layout.Alignment.ALIGN_NORMAL)
+
+                val quantity = item.quantity.toString()
+                val quantityHeight = measure(quantity, quantityWidth, 9, true, Layout.Alignment.ALIGN_CENTER)
+                drawCell(quantity, quantityX.toFloat(), y + ((rowHeight - quantityHeight) / 2), quantityWidth, 9, true, navy, Layout.Alignment.ALIGN_CENTER)
+
+                val note = if (item.approximate) t(lang, "Approx.", "تقريباً", "نزیکەی") else ""
+                if (note.isNotBlank()) {
+                    val noteHeight = measure(note, noteWidth - 6, 8, true, Layout.Alignment.ALIGN_CENTER)
+                    drawCell(note, (noteX + 3).toFloat(), y + ((rowHeight - noteHeight) / 2), noteWidth - 6, 8, true, muted, Layout.Alignment.ALIGN_CENTER)
+                }
+
+                if (settings.showPrices) {
+                    val price = item.unitPrice.ifBlank { "-" }
+                    val priceHeight = measure(price, priceWidth - 8, 9, false, Layout.Alignment.ALIGN_CENTER)
+                    drawCell(price, (priceX + 4).toFloat(), y + ((rowHeight - priceHeight) / 2), priceWidth - 8, 9, false, navy, Layout.Alignment.ALIGN_CENTER)
+                }
+
+                paint.color = border
+                canvas!!.drawLine(left.toFloat(), (y + rowHeight).toFloat(), right.toFloat(), (y + rowHeight).toFloat(), paint)
+                if (rtl) {
+                    canvas!!.drawLine(itemX.toFloat(), y.toFloat(), itemX.toFloat(), (y + rowHeight).toFloat(), paint)
+                    canvas!!.drawLine(quantityX.toFloat(), y.toFloat(), quantityX.toFloat(), (y + rowHeight).toFloat(), paint)
+                    if (settings.showPrices) canvas!!.drawLine(noteX.toFloat(), y.toFloat(), noteX.toFloat(), (y + rowHeight).toFloat(), paint)
+                } else {
+                    canvas!!.drawLine(quantityX.toFloat(), y.toFloat(), quantityX.toFloat(), (y + rowHeight).toFloat(), paint)
+                    canvas!!.drawLine(noteX.toFloat(), y.toFloat(), noteX.toFloat(), (y + rowHeight).toFloat(), paint)
+                    if (settings.showPrices) canvas!!.drawLine(priceX.toFloat(), y.toFloat(), priceX.toFloat(), (y + rowHeight).toFloat(), paint)
+                }
+                y += rowHeight
+            }
+
+            if (settings.showEstimatedTotal) {
+                val hasAnyEnteredPrice = s.items.any { it.unitPrice.toBigDecimalOrNull() != null }
+                totalRow(t(lang, "Estimated Total", "المجموع التقديري", "کۆی خەمڵاندراو"), if (hasAnyEnteredPrice) "${s.estimatedTotal.stripTrailingZeros()} ${s.currency}" else "-")
+            }
+        }
+
+        private fun materialHeader(settings: Settings) {
+            val itemWidth = if (settings.showPrices) 304 else 388
+            val quantityWidth = 55
+            val noteWidth = 72
+            val priceWidth = if (settings.showPrices) 84 else 0
+            val priceX: Int
+            val noteX: Int
+            val quantityX: Int
+            val itemX: Int
+            if (rtl) {
+                priceX = left
+                noteX = left + priceWidth
+                quantityX = noteX + noteWidth
+                itemX = quantityX + quantityWidth
+            } else {
+                itemX = left
+                quantityX = left + itemWidth
+                noteX = quantityX + quantityWidth
+                priceX = noteX + noteWidth
+            }
+            val headerHeight = 24
+            ensure(headerHeight + 2)
+            paint.color = teal
+            canvas!!.drawRect(left.toFloat(), y.toFloat(), right.toFloat(), (y + headerHeight).toFloat(), paint)
+            drawCell(t(lang, "Item / Specification", "المادة / المواصفات", "ماددە / تایبەتمەندی"), (itemX + 7).toFloat(), y + 5, itemWidth - 14, 8, true, Color.WHITE, Layout.Alignment.ALIGN_NORMAL)
+            drawCell(t(lang, "Qty", "الكمية", "بڕ"), quantityX.toFloat(), y + 5, quantityWidth, 8, true, Color.WHITE, Layout.Alignment.ALIGN_CENTER)
+            drawCell(t(lang, "Note", "ملاحظة", "تێبینی"), noteX.toFloat(), y + 5, noteWidth, 8, true, Color.WHITE, Layout.Alignment.ALIGN_CENTER)
+            if (settings.showPrices) drawCell(t(lang, "Unit Price", "سعر الوحدة", "نرخی دانە"), (priceX + 4).toFloat(), y + 5, priceWidth - 8, 8, true, Color.WHITE, Layout.Alignment.ALIGN_CENTER)
+            paint.color = Color.argb(90, 255, 255, 255)
+            if (rtl) {
+                canvas!!.drawLine(itemX.toFloat(), y.toFloat(), itemX.toFloat(), (y + headerHeight).toFloat(), paint)
+                canvas!!.drawLine(quantityX.toFloat(), y.toFloat(), quantityX.toFloat(), (y + headerHeight).toFloat(), paint)
+                if (settings.showPrices) canvas!!.drawLine(noteX.toFloat(), y.toFloat(), noteX.toFloat(), (y + headerHeight).toFloat(), paint)
+            } else {
+                canvas!!.drawLine(quantityX.toFloat(), y.toFloat(), quantityX.toFloat(), (y + headerHeight).toFloat(), paint)
+                canvas!!.drawLine(noteX.toFloat(), y.toFloat(), noteX.toFloat(), (y + headerHeight).toFloat(), paint)
+                if (settings.showPrices) canvas!!.drawLine(priceX.toFloat(), y.toFloat(), priceX.toFloat(), (y + headerHeight).toFloat(), paint)
+            }
+            y += headerHeight
+        }
+
+'''
+          t=t[:start]+replacement+t[end:]
+          pdf.write_text(t)
+
           build=root/'app/build.gradle.kts'
           t=build.read_text()
-          assert 'versionCode = 44' in t, 'Expected RC10 versionCode missing'
-          assert 'versionName = "5.0.0-rc10"' in t, 'Expected RC10 versionName missing'
-          t=t.replace('versionCode = 44','versionCode = 45',1)
-          t=t.replace('versionName = "5.0.0-rc10"','versionName = "5.0.0-rc11"',1)
-          build.write_text(t)
+          assert 'versionCode = 45' in t
+          assert 'versionName = "5.0.0-rc11"' in t
+          build.write_text(t.replace('versionCode = 45','versionCode = 46',1).replace('versionName = "5.0.0-rc11"','versionName = "5.0.0-rc12"',1))
           PY
 
-          grep -Fq 'Approximate quantity' "$FORM"
-          grep -Fq 'Add AC & civil-work exclusions' "$FORM"
+          grep -Fq 'contentWindowInsets = WindowInsets.safeDrawing' "$APP"
+          grep -Fq 'imeVisible = WindowInsets.ime.getBottom' "$APP"
+          grep -Fq 'android:windowSoftInputMode="adjustResize"' "$MANIFEST"
+          grep -Fq 'Modifier.fillMaxSize().padding(padding).imePadding()' "$FORM"
+          grep -Fq 'Box(Modifier.imePadding())' "$FORM"
           grep -Fq 'KeyboardType.Text' "$FORM"
-          grep -Fq 'STANDARD_NOTE_AC = "لا یشمل مواد واعمال AC"' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormModels.kt"
-          grep -Fq 'STANDARD_NOTE_CIVIL = "لا یشمل اعمال مدنیة ان وجدت"' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormModels.kt"
-          grep -Fq 'versionCode = 45' "$BUILD"
-          grep -Fq 'versionName = "5.0.0-rc11"' "$BUILD"
-
+          grep -Fq 'Add AC & civil-work exclusions' "$FORM"
+          grep -Fq 't(lang, "Note", "ملاحظة", "تێبینی")' "$PDF"
+          grep -Fq 'val note = if (item.approximate)' "$PDF"
+          grep -Fq 'val quantity = item.quantity.toString()' "$PDF"
+          grep -Fq 'versionCode = 46' "$BUILD"
+          grep -Fq 'versionName = "5.0.0-rc12"' "$BUILD"
           cat build-input/v5_language_fix/preview-test-keystore.b64 | base64 -d > /tmp/igp-preview-test.jks
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
       - uses: android-actions/setup-android@v3
-
       - name: Install Android SDK 36
         shell: bash
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
-
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.4.1'
 
-      - name: Build RC11 APK
+      - name: Build RC12 APK
         working-directory: /tmp/igp-build/IGP
         env:
           IGP_PREVIEW_KEYSTORE: /tmp/igp-preview-test.jks
@@ -102,7 +288,7 @@ jobs:
           IGP_PREVIEW_KEY_PASSWORD: IGPPreview2026!
         run: gradle --no-daemon clean assembleDebug
 
-      - name: Verify RC11 APK
+      - name: Verify RC12 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -112,32 +298,32 @@ jobs:
           BADGING=$("$AAPT" dump badging "$APK" | head -n 1)
           echo "$BADGING"
           echo "$BADGING" | grep "name='com.infinitygreenpower.offerstudio.preview'"
-          echo "$BADGING" | grep "versionCode='45'"
-          echo "$BADGING" | grep "versionName='5.0.0-rc11-test'"
+          echo "$BADGING" | grep "versionCode='46'"
+          echo "$BADGING" | grep "versionName='5.0.0-rc12-test'"
           "$APKSIGNER" verify --print-certs "$APK" | tee /tmp/signing.txt
           grep -qi '1f83a683d692d6530df5ba8e4ba1892e18bb11a313c5f744b464f3bf003c06f0' /tmp/signing.txt
           unzip -t "$APK" >/dev/null
-          cp "$APK" IGP-Organizer-Form-5.0.0-rc11-Approx-Notes-FreeTextDuration.apk
-          sha256sum IGP-Organizer-Form-5.0.0-rc11-Approx-Notes-FreeTextDuration.apk | tee /tmp/rc11-sha.txt
+          cp "$APK" IGP-Organizer-Form-5.0.0-rc12-Insets-Keyboard-PDF-Note-Column.apk
+          sha256sum IGP-Organizer-Form-5.0.0-rc12-Insets-Keyboard-PDF-Note-Column.apk | tee /tmp/rc12-sha.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: IGP-Organizer-Form-5.0.0-rc11-APK
-          path: IGP-Organizer-Form-5.0.0-rc11-Approx-Notes-FreeTextDuration.apk
+          name: IGP-Organizer-Form-5.0.0-rc12-APK
+          path: IGP-Organizer-Form-5.0.0-rc12-Insets-Keyboard-PDF-Note-Column.apk
           retention-days: 7
 
-      - name: Publish RC11 APK and source
+      - name: Publish RC12 APK and source
         shell: bash
         run: |
           mkdir -p build-output
-          cp IGP-Organizer-Form-5.0.0-rc11-Approx-Notes-FreeTextDuration.apk build-output/
-          cp /tmp/rc11-sha.txt build-output/IGP-Organizer-Form-5.0.0-rc11.sha256.txt
+          cp IGP-Organizer-Form-5.0.0-rc12-Insets-Keyboard-PDF-Note-Column.apk build-output/
+          cp /tmp/rc12-sha.txt build-output/IGP-Organizer-Form-5.0.0-rc12.sha256.txt
           cd /tmp/igp-build
-          zip -qr "$GITHUB_WORKSPACE/build-output/IGP-Organizer-Form-5.0.0-rc11-source.zip" IGP
+          zip -qr "$GITHUB_WORKSPACE/build-output/IGP-Organizer-Form-5.0.0-rc12-source.zip" IGP
           cd "$GITHUB_WORKSPACE"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git pull --rebase origin chatgpt-v5-pdf-fix-build || true
-          git add build-output/IGP-Organizer-Form-5.0.0-rc11-Approx-Notes-FreeTextDuration.apk build-output/IGP-Organizer-Form-5.0.0-rc11.sha256.txt build-output/IGP-Organizer-Form-5.0.0-rc11-source.zip
-          git commit -m 'Publish v5.0.0-rc11 APK and source' || exit 0
+          git add build-output/IGP-Organizer-Form-5.0.0-rc12-Insets-Keyboard-PDF-Note-Column.apk build-output/IGP-Organizer-Form-5.0.0-rc12.sha256.txt build-output/IGP-Organizer-Form-5.0.0-rc12-source.zip
+          git commit -m 'Publish v5.0.0-rc12 APK and source' || exit 0
           git push
