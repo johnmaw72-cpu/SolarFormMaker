@@ -53,7 +53,7 @@ jobs:
           }
           expected={
             'FormScreen.kt':'412155511cc61f602c30786b8cc44062d4f84f1ce89b069a5f2ead2fa3328555',
-            'CatalogScreen.kt':'4d0ec5808c24d4f8c11834a0e8ad33d134659a79d25bc7bead24c2016b7341a7',
+            'CatalogScreen.kt':'167b050bc8f781e417ec3c3264de97e330468ddb311d28204395771c4a024eb3',
           }
           for src,dst in mapping.items():
             data=zlib.decompress(base64.b64decode(src.read_bytes()))
