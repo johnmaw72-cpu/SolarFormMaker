@@ -1,0 +1,258 @@
+name: Temporary RC13 APK Build
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct RC12 source and apply RC13 New Form fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin chatgpt-v5-pdf-fix-build
+          mkdir -p build-output build-input/v5_language_fix
+          git show origin/chatgpt-v5-pdf-fix-build:build-output/IGP-Organizer-Form-5.0.0-rc11-source.zip > build-output/IGP-Organizer-Form-5.0.0-rc11-source.zip
+          git show origin/chatgpt-v5-pdf-fix-build:build-input/v5_language_fix/preview-test-keystore.b64 > build-input/v5_language_fix/preview-test-keystore.b64
+          git show origin/chatgpt-v5-pdf-fix-build:.github/workflows/build-v5-rc12-insets-pdf-note-column.yml > /tmp/rc12.yml
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          lines=Path('/tmp/rc12.yml').read_text().splitlines()
+          start=None
+          for i,line in enumerate(lines):
+              if line.strip() == '- name: Prepare RC12 source from verified RC11':
+                  start=i
+                  break
+          assert start is not None
+          run=None
+          for i in range(start+1,len(lines)):
+              if lines[i].strip() == 'run: |':
+                  run=i+1
+                  break
+          assert run is not None
+          out=[]
+          for line in lines[run:]:
+              if line.startswith('      - '):
+                  break
+              if line.startswith('          '): line=line[10:]
+              out.append(line)
+          p=Path('/tmp/apply_rc12.sh'); p.write_text('\n'.join(out)+'\n')
+          subprocess.run(['bash',str(p)],check=True)
+          PY
+
+          python - <<'PY'
+          from pathlib import Path
+          root=Path('/tmp/igp-build/IGP')
+          pkg=root/'app/src/main/java/com/infinitygreenpower/organizerform'
+
+          # FormViewModel: New Form must not automatically reopen the active draft.
+          vm=pkg/'feature/form/FormViewModel.kt'
+          t=vm.read_text()
+          old='''class FormViewModel(
+    application: Application,
+    private val initialFormId: String? = null,
+    private val savedStateHandle: SavedStateHandle
+) : AndroidViewModel(application) {'''
+          new='''class FormViewModel(
+    application: Application,
+    private val initialFormId: String? = null,
+    private val resumeActiveDraft: Boolean = false,
+    private val savedStateHandle: SavedStateHandle
+) : AndroidViewModel(application) {'''
+          assert old in t, 'FormViewModel constructor anchor missing'
+          t=t.replace(old,new,1)
+          old='''            val aggregate = initialFormId?.let { forms.observe(it).first() } ?: forms.observeActiveDraft().first()'''
+          new='''            val aggregate = when {
+                initialFormId != null -> forms.observe(initialFormId).first()
+                resumeActiveDraft -> forms.observeActiveDraft().first()
+                else -> null
+            }'''
+          assert old in t, 'active draft init anchor missing'
+          t=t.replace(old,new,1)
+          old='''        fun factory(application: Application, formId: String?): ViewModelProvider.Factory = viewModelFactory {
+            initializer { FormViewModel(application, formId, createSavedStateHandle()) }
+        }'''
+          new='''        fun factory(application: Application, formId: String?, resumeActiveDraft: Boolean = false): ViewModelProvider.Factory = viewModelFactory {
+            initializer { FormViewModel(application, formId, resumeActiveDraft, createSavedStateHandle()) }
+        }'''
+          assert old in t, 'factory anchor missing'
+          t=t.replace(old,new,1)
+          vm.write_text(t)
+
+          # FormScreen: separate fresh form and resume-draft ViewModels.
+          form=pkg/'feature/form/FormScreen.kt'
+          t=form.read_text()
+          old='''fun FormScreen(formId: String? = null) {
+    val application = LocalContext.current.applicationContext as Application
+    val vm: FormViewModel = viewModel(
+        key = "form-${formId ?: "active"}",
+        factory = FormViewModel.factory(application, formId)
+    )'''
+          new='''fun FormScreen(formId: String? = null, resumeActiveDraft: Boolean = false) {
+    val application = LocalContext.current.applicationContext as Application
+    val vm: FormViewModel = viewModel(
+        key = "form-${formId ?: if (resumeActiveDraft) "active-draft" else "fresh"}",
+        factory = FormViewModel.factory(application, formId, resumeActiveDraft)
+    )'''
+          assert old in t, 'FormScreen ViewModel anchor missing'
+          t=t.replace(old,new,1)
+          form.write_text(t)
+
+          # Navigation: each New Form tap gets a unique fresh route. Quick Preview keeps draft resume behavior.
+          app=pkg/'app/IGPOrganizerApp.kt'
+          t=app.read_text()
+          old='''    val current = entry?.destination?.route ?: Destination.Home.route
+    val selectedRoute = if (current == "edit/{formId}") Destination.Saved.route else current
+    val expanded = LocalConfiguration.current.screenWidthDp >= 600'''
+          new='''    val current = entry?.destination?.route ?: Destination.Home.route
+    val selectedRoute = when (current) {
+        "edit/{formId}" -> Destination.Saved.route
+        "new/{session}" -> Destination.NewForm.route
+        "draft" -> Destination.NewForm.route
+        else -> current
+    }
+    val expanded = LocalConfiguration.current.screenWidthDp >= 600'''
+          assert old in t, 'selected route anchor missing'
+          t=t.replace(old,new,1)
+          old='''    val select: (Destination) -> Unit = { destination ->
+        // An edit screen belongs to Saved Forms visually, but it must not become the
+        // restored root of the Saved tab. Remove the child edit route before changing tabs
+        // so tapping Saved always opens the Saved Forms list rather than the last form.
+        val leavingSavedEdit = navController.currentDestination?.route == "edit/{formId}"
+        if (leavingSavedEdit) {
+            navController.popBackStack(Destination.Saved.route, inclusive = false)
+        }
+
+        navController.navigate(destination.route) {
+            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+            launchSingleTop = true
+            // Never restore an old Saved -> Edit child stack when the user explicitly taps Saved.
+            restoreState = destination != Destination.Saved
+        }
+    }'''
+          new='''    val select: (Destination) -> Unit = { destination ->
+        if (destination == Destination.NewForm) {
+            navController.navigate("new/${System.nanoTime()}") {
+                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                launchSingleTop = true
+                restoreState = false
+            }
+        } else {
+            // An edit screen belongs to Saved Forms visually, but it must not become the
+            // restored root of the Saved tab. Remove the child edit route before changing tabs.
+            val leavingSavedEdit = navController.currentDestination?.route == "edit/{formId}"
+            if (leavingSavedEdit) {
+                navController.popBackStack(Destination.Saved.route, inclusive = false)
+            }
+            navController.navigate(destination.route) {
+                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                launchSingleTop = true
+                restoreState = destination != Destination.Saved
+            }
+        }
+    }'''
+          assert old in t, 'select function anchor missing'
+          t=t.replace(old,new,1)
+          old='''                            onPreview = { select(Destination.NewForm) }'''
+          new='''                            onPreview = {
+                                navController.navigate("draft") {
+                                    launchSingleTop = true
+                                }
+                            }'''
+          assert old in t, 'Home preview anchor missing'
+          t=t.replace(old,new,1)
+          old='''                    composable(Destination.NewForm.route) { FormScreen() }'''
+          new='''                    composable(
+                        route = "new/{session}",
+                        arguments = listOf(navArgument("session") { type = NavType.StringType })
+                    ) { FormScreen() }
+                    composable("draft") { FormScreen(resumeActiveDraft = true) }'''
+          assert old in t, 'new form route anchor missing'
+          t=t.replace(old,new,1)
+          app.write_text(t)
+
+          # Saved Forms should include drafts too, so starting a fresh form never hides older drafts.
+          dao=pkg/'data/db/Daos.kt'
+          t=dao.read_text()
+          old='''    @Transaction @Query("SELECT * FROM forms WHERE isDraft = 0 ORDER BY updatedAt DESC") fun observeSavedAggregates(): Flow<List<FormAggregate>>'''
+          new='''    @Transaction @Query("SELECT * FROM forms ORDER BY updatedAt DESC") fun observeSavedAggregates(): Flow<List<FormAggregate>>'''
+          assert old in t, 'saved aggregates query anchor missing'
+          t=t.replace(old,new,1)
+          dao.write_text(t)
+
+          saved=pkg/'feature/saved/SavedFormsScreen.kt'
+          t=saved.read_text()
+          old='''Text(a.form.formDate,color=Muted,fontSize=12.sp);Text(a.form.organizerSnapshotName,color=Muted,fontSize=12.sp);'''
+          new='''Text(a.form.formDate,color=Muted,fontSize=12.sp);if(a.form.isDraft){Text(localText("Draft","مسودة","ڕەشنووس"),color=InfinityTeal,fontWeight=FontWeight.SemiBold,fontSize=12.sp)};Text(a.form.organizerSnapshotName,color=Muted,fontSize=12.sp);'''
+          assert old in t, 'saved form date anchor missing'
+          t=t.replace(old,new,1)
+          saved.write_text(t)
+
+          build=root/'app/build.gradle.kts'
+          t=build.read_text()
+          assert 'versionCode = 46' in t and 'versionName = "5.0.0-rc12"' in t
+          t=t.replace('versionCode = 46','versionCode = 47',1)
+          t=t.replace('versionName = "5.0.0-rc12"','versionName = "5.0.0-rc13"',1)
+          build.write_text(t)
+          PY
+
+          ROOT=/tmp/igp-build/IGP
+          grep -Fq 'resumeActiveDraft -> forms.observeActiveDraft().first()' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormViewModel.kt"
+          grep -Fq 'new/{session}' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/app/IGPOrganizerApp.kt"
+          grep -Fq 'composable("draft")' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/app/IGPOrganizerApp.kt"
+          grep -Fq 'SELECT * FROM forms ORDER BY updatedAt DESC' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/data/db/Daos.kt"
+          grep -Fq '"Draft","مسودة","ڕەشنووس"' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/feature/saved/SavedFormsScreen.kt"
+          grep -Fq 'versionCode = 47' "$ROOT/app/build.gradle.kts"
+          grep -Fq 'versionName = "5.0.0-rc13"' "$ROOT/app/build.gradle.kts"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 36
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+      - name: Build RC13 APK
+        working-directory: /tmp/igp-build/IGP
+        env:
+          IGP_PREVIEW_KEYSTORE: /tmp/igp-preview-test.jks
+          IGP_PREVIEW_STORE_PASSWORD: IGPPreview2026!
+          IGP_PREVIEW_KEY_ALIAS: igp-preview
+          IGP_PREVIEW_KEY_PASSWORD: IGPPreview2026!
+        run: gradle --no-daemon clean assembleDebug
+      - name: Verify RC13 APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=/tmp/igp-build/IGP/app/build/outputs/apk/debug/app-debug.apk
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          BADGING=$("$AAPT" dump badging "$APK" | head -n 1)
+          echo "$BADGING"
+          echo "$BADGING" | grep "name='com.infinitygreenpower.offerstudio.preview'"
+          echo "$BADGING" | grep "versionCode='47'"
+          echo "$BADGING" | grep "versionName='5.0.0-rc13-test'"
+          "$APKSIGNER" verify --print-certs "$APK" | tee /tmp/signing.txt
+          grep -qi '1f83a683d692d6530df5ba8e4ba1892e18bb11a313c5f744b464f3bf003c06f0' /tmp/signing.txt
+          unzip -t "$APK" >/dev/null
+          cp "$APK" IGP-Organizer-Form-5.0.0-rc13-New-Form-Draft-Fix.apk
+          sha256sum IGP-Organizer-Form-5.0.0-rc13-New-Form-Draft-Fix.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IGP-Organizer-Form-5.0.0-rc13-APK
+          path: IGP-Organizer-Form-5.0.0-rc13-New-Form-Draft-Fix.apk
+          retention-days: 7
