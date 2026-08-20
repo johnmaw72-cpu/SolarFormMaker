@@ -1,0 +1,143 @@
+name: Build IGP RC11 Emergency Duration Text
+
+on:
+  push:
+    branches: [chatgpt-v5-pdf-fix-build]
+    paths: ['.github/workflows/build-v5-rc11-emergency-duration-text.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish run id
+        shell: bash
+        run: |
+          mkdir -p build-output
+          echo "${GITHUB_RUN_ID}" > build-output/rc11-run-id.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add build-output/rc11-run-id.txt
+          git commit -m 'Publish RC11 run id' || true
+          git push || true
+
+      - name: Prepare RC11 source from verified RC10 final
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/igp-build
+          mkdir -p /tmp/igp-build
+          unzip -q build-output/IGP-Organizer-Form-5.0.0-rc10-Final-source.zip -d /tmp/igp-build
+          ROOT=/tmp/igp-build/IGP
+          FORM="$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt"
+          BUILD="$ROOT/app/build.gradle.kts"
+          test -f "$FORM"
+          test -f "$BUILD"
+
+          python - <<'PY'
+          from pathlib import Path
+          root=Path('/tmp/igp-build/IGP')
+          form=root/'app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt'
+          t=form.read_text()
+
+          old='@Composable private fun MiniField(value:String,onValue:(String)->Unit,label:String,modifier:Modifier){OutlinedTextField(value,onValue,modifier.padding(vertical=4.dp),label={Text(label,fontSize=10.sp)},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Decimal),singleLine=true)}'
+          new='@Composable private fun MiniField(value:String,onValue:(String)->Unit,label:String,modifier:Modifier,keyboard:KeyboardType=KeyboardType.Decimal){OutlinedTextField(value,onValue,modifier.padding(vertical=4.dp),label={Text(label,fontSize=10.sp)},keyboardOptions=KeyboardOptions(keyboardType=keyboard),singleLine=true)}'
+          assert old in t, 'MiniField anchor missing'
+          t=t.replace(old,new,1)
+
+          old='MiniField(s.emergencyDuration,{v->vm.update{copy(emergencyDuration=v)}},tr(lang,"Duration","المدة","ماوە"),Modifier.weight(1f))'
+          new='MiniField(s.emergencyDuration,{v->vm.update{copy(emergencyDuration=v)}},tr(lang,"Duration","المدة","ماوە"),Modifier.weight(1f),KeyboardType.Text)'
+          assert old in t, 'Emergency duration field anchor missing'
+          t=t.replace(old,new,1)
+          form.write_text(t)
+
+          build=root/'app/build.gradle.kts'
+          t=build.read_text()
+          assert 'versionCode = 44' in t, 'Expected RC10 versionCode missing'
+          assert 'versionName = "5.0.0-rc10"' in t, 'Expected RC10 versionName missing'
+          t=t.replace('versionCode = 44','versionCode = 45',1)
+          t=t.replace('versionName = "5.0.0-rc10"','versionName = "5.0.0-rc11"',1)
+          build.write_text(t)
+          PY
+
+          grep -Fq 'Approximate quantity' "$FORM"
+          grep -Fq 'Add AC & civil-work exclusions' "$FORM"
+          grep -Fq 'KeyboardType.Text' "$FORM"
+          grep -Fq 'STANDARD_NOTE_AC = "لا یشمل مواد واعمال AC"' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormModels.kt"
+          grep -Fq 'STANDARD_NOTE_CIVIL = "لا یشمل اعمال مدنیة ان وجدت"' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormModels.kt"
+          grep -Fq 'versionCode = 45' "$BUILD"
+          grep -Fq 'versionName = "5.0.0-rc11"' "$BUILD"
+
+          cat build-input/v5_language_fix/preview-test-keystore.b64 | base64 -d > /tmp/igp-preview-test.jks
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Build RC11 APK
+        working-directory: /tmp/igp-build/IGP
+        env:
+          IGP_PREVIEW_KEYSTORE: /tmp/igp-preview-test.jks
+          IGP_PREVIEW_STORE_PASSWORD: IGPPreview2026!
+          IGP_PREVIEW_KEY_ALIAS: igp-preview
+          IGP_PREVIEW_KEY_PASSWORD: IGPPreview2026!
+        run: gradle --no-daemon clean assembleDebug
+
+      - name: Verify RC11 APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=/tmp/igp-build/IGP/app/build/outputs/apk/debug/app-debug.apk
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          BADGING=$("$AAPT" dump badging "$APK" | head -n 1)
+          echo "$BADGING"
+          echo "$BADGING" | grep "name='com.infinitygreenpower.offerstudio.preview'"
+          echo "$BADGING" | grep "versionCode='45'"
+          echo "$BADGING" | grep "versionName='5.0.0-rc11-test'"
+          "$APKSIGNER" verify --print-certs "$APK" | tee /tmp/signing.txt
+          grep -qi '1f83a683d692d6530df5ba8e4ba1892e18bb11a313c5f744b464f3bf003c06f0' /tmp/signing.txt
+          unzip -t "$APK" >/dev/null
+          cp "$APK" IGP-Organizer-Form-5.0.0-rc11-Approx-Notes-FreeTextDuration.apk
+          sha256sum IGP-Organizer-Form-5.0.0-rc11-Approx-Notes-FreeTextDuration.apk | tee /tmp/rc11-sha.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IGP-Organizer-Form-5.0.0-rc11-APK
+          path: IGP-Organizer-Form-5.0.0-rc11-Approx-Notes-FreeTextDuration.apk
+          retention-days: 7
+
+      - name: Publish RC11 APK and source
+        shell: bash
+        run: |
+          mkdir -p build-output
+          cp IGP-Organizer-Form-5.0.0-rc11-Approx-Notes-FreeTextDuration.apk build-output/
+          cp /tmp/rc11-sha.txt build-output/IGP-Organizer-Form-5.0.0-rc11.sha256.txt
+          cd /tmp/igp-build
+          zip -qr "$GITHUB_WORKSPACE/build-output/IGP-Organizer-Form-5.0.0-rc11-source.zip" IGP
+          cd "$GITHUB_WORKSPACE"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git pull --rebase origin chatgpt-v5-pdf-fix-build || true
+          git add build-output/IGP-Organizer-Form-5.0.0-rc11-Approx-Notes-FreeTextDuration.apk build-output/IGP-Organizer-Form-5.0.0-rc11.sha256.txt build-output/IGP-Organizer-Form-5.0.0-rc11-source.zip
+          git commit -m 'Publish v5.0.0-rc11 APK and source' || exit 0
+          git push
