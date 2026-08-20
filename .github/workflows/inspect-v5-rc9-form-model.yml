@@ -1,0 +1,67 @@
+name: Inspect IGP RC9 Form Model
+
+on:
+  push:
+    branches: [chatgpt-v5-pdf-fix-build]
+    paths: ['.github/workflows/inspect-v5-rc9-form-model.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct current RC9 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat build-input/v5_pdf_fix/source.b64.part* | base64 -d > /tmp/igp-source.zip
+          rm -rf /tmp/igp-build && mkdir -p /tmp/igp-build
+          unzip -q /tmp/igp-source.zip -d /tmp/igp-build || true
+          SRC=/tmp/igp-build/IGP/app/src
+          mkdir -p "$SRC/main"
+          for DIR in java res assets; do [ -d "$SRC/$DIR" ] && cp -a "$SRC/$DIR" "$SRC/main/" || true; done
+          [ -f "$SRC/AndroidManifest.xml" ] && cp "$SRC/AndroidManifest.xml" "$SRC/main/AndroidManifest.xml" || true
+          cp build-input/v5_pdf_fix/Relations.kt "$SRC/main/java/com/infinitygreenpower/organizerform/data/db/Relations.kt"
+          cat build-input/v5_language_fix/overlay.b64.part* | base64 -d > /tmp/rc3-overlay.tar.gz
+          tar -xzf /tmp/rc3-overlay.tar.gz -C /tmp/igp-build/IGP
+          cat build-input/v5_rc4_fix/overlay.b64.part* | base64 -d > /tmp/rc4-overlay.tar.gz
+          tar -xzf /tmp/rc4-overlay.tar.gz -C /tmp/igp-build/IGP
+          python - <<'PY'
+          import base64,zlib
+          from pathlib import Path
+          repo=Path.cwd(); root=Path('/tmp/igp-build/IGP')
+          mapping={
+            repo/'build-input/v5_rc9_fix/FormScreen.z9.b64': root/'app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt',
+            repo/'build-input/v5_rc8_fix/IGPOrganizerApp.z9.b64': root/'app/src/main/java/com/infinitygreenpower/organizerform/app/IGPOrganizerApp.kt',
+            repo/'build-input/v5_rc8_fix/SettingsScreen.z9.b64': root/'app/src/main/java/com/infinitygreenpower/organizerform/feature/settings/SettingsScreen.kt',
+            repo/'build-input/v5_rc8_fix/PdfExporter.z9.b64': root/'app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt',
+            repo/'build-input/v5_rc9_fix/CatalogScreen.z9.b64': root/'app/src/main/java/com/infinitygreenpower/organizerform/feature/catalog/CatalogScreen.kt',
+          }
+          for src,dst in mapping.items():
+            dst.parent.mkdir(parents=True,exist_ok=True)
+            dst.write_bytes(zlib.decompress(base64.b64decode(src.read_bytes())))
+          PY
+      - name: Publish relevant source excerpts
+        shell: bash
+        run: |
+          ROOT=/tmp/igp-build/IGP/app/src/main/java/com/infinitygreenpower/organizerform
+          OUT=$GITHUB_WORKSPACE/build-output/rc9-form-model-inspection.txt
+          mkdir -p "$GITHUB_WORKSPACE/build-output"
+          {
+            echo '===== FormModels.kt ====='; sed -n '1,260p' "$ROOT/feature/form/FormModels.kt"
+            echo; echo '===== FormViewModel.kt ====='; sed -n '1,420p' "$ROOT/feature/form/FormViewModel.kt"
+            echo; echo '===== FormScreen.kt 440-700 ====='; sed -n '440,700p' "$ROOT/feature/form/FormScreen.kt"
+            echo; echo '===== PdfExporter.kt relevant ====='; grep -n -E 'Materials|Notes|customNote|quantity|specification|DraftItem|items|paragraph|material' "$ROOT/export/pdf/PdfExporter.kt" | head -120
+            echo; echo '===== FormExportModel.kt ====='; sed -n '1,320p' "$ROOT/export/json/FormExportModel.kt"
+            echo; echo '===== Entities.kt ====='; sed -n '1,360p' "$ROOT/data/db/Entities.kt"
+            echo; echo '===== Daos.kt ====='; sed -n '1,260p' "$ROOT/data/db/Daos.kt"
+          } > "$OUT"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add build-output/rc9-form-model-inspection.txt
+          git commit -m 'Publish RC9 form model inspection' || true
+          git push || true
