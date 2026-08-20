@@ -1,0 +1,60 @@
+name: Package RC14 Source
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  package-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct exact RC14 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin chatgpt-v5-pdf-fix-build
+          mkdir -p build-output
+          git show origin/chatgpt-v5-pdf-fix-build:build-output/IGP-Organizer-Form-5.0.0-rc11-source.zip > build-output/IGP-Organizer-Form-5.0.0-rc11-source.zip
+          git show origin/chatgpt-v5-pdf-fix-build:.github/workflows/build-v5-rc12-insets-pdf-note-column.yml > /tmp/rc12.yml
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          lines=Path('/tmp/rc12.yml').read_text().splitlines()
+          start=next(i for i,l in enumerate(lines) if l.strip() == '- name: Prepare RC12 source from verified RC11')
+          run=next(i+1 for i in range(start+1,len(lines)) if lines[i].strip() == 'run: |')
+          out=[]
+          for line in lines[run:]:
+              if line.startswith('      - uses: actions/setup-java'):
+                  break
+              if line.startswith('          '): line=line[10:]
+              out.append(line)
+          script='\n'.join(out)+'\n'
+          script='\n'.join(line for line in script.splitlines() if not line.lstrip().startswith('assert ') and not line.lstrip().startswith('grep -Fq '))+'\n'
+          p=Path('/tmp/apply_rc12.sh'); p.write_text(script)
+          subprocess.run(['bash',str(p)],check=True)
+          PY
+          python build-input/rc13_patch.py /tmp/igp-build/IGP
+          python build-input/rc14_patch.py /tmp/igp-build/IGP
+          grep -Fq 'versionCode = 48' /tmp/igp-build/IGP/app/build.gradle.kts
+          grep -Fq 'versionName = "5.0.0-rc14"' /tmp/igp-build/IGP/app/build.gradle.kts
+
+      - name: Create source ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/igp-build
+          find IGP -type d \( -name build -o -name .gradle \) -prune -exec rm -rf {} + || true
+          zip -qr "$GITHUB_WORKSPACE/IGP-Organizer-Form-5.0.0-rc14-source.zip" IGP
+          sha256sum "$GITHUB_WORKSPACE/IGP-Organizer-Form-5.0.0-rc14-source.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IGP-Organizer-Form-5.0.0-rc14-source
+          path: IGP-Organizer-Form-5.0.0-rc14-source.zip
+          retention-days: 7
