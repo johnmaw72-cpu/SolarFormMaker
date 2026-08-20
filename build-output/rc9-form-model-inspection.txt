@@ -1,0 +1,848 @@
+===== FormModels.kt =====
+package com.infinitygreenpower.organizerform.feature.form
+
+import com.infinitygreenpower.organizerform.data.db.CatalogItemEntity
+import com.infinitygreenpower.organizerform.data.db.FormAggregate
+import java.math.BigDecimal
+import java.time.LocalDate
+import java.util.UUID
+
+data class DraftItem(
+    val id: String = UUID.randomUUID().toString(),
+    val catalogId: String? = null,
+    val name: String = "",
+    val category: String = "Custom",
+    val specification: String = "",
+    val quantity: Int = 1,
+    val unitPrice: String = ""
+) {
+    val lineTotal: BigDecimal? get() = unitPrice.toBigDecimalOrNull()?.multiply(quantity.toBigDecimal())
+}
+
+data class DraftPhoto(val id: String, val path: String, val displayName: String, val mimeType: String, val included: Boolean = true)
+
+data class FormUiState(
+    val id: String = UUID.randomUUID().toString(),
+    val legacyId: String? = null,
+    val migratedFromLegacy: Boolean = false,
+    val schemaVersion: Int = 1,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = createdAt,
+    val step: Int = 1,
+    val clientName: String = "",
+    val phone: String = "",
+    val location: String = "",
+    val date: String = LocalDate.now().toString(),
+    val systemType: String = "Hybrid",
+    val capacity: String = "",
+    val phase: String = "Single Phase",
+    val items: List<DraftItem> = emptyList(),
+    val organizerId: String? = null,
+    val organizerName: String = "",
+    val dayFrom: String = "",
+    val dayTo: String = "",
+    val nightAmps: String = "",
+    val nightHours: String = "",
+    val emergencyAmps: String = "",
+    val emergencyDuration: String = "",
+    val customNote: String = "",
+    val photos: List<DraftPhoto> = emptyList(),
+    val currency: String = "USD",
+    val errors: Set<String> = emptySet(),
+    val message: String? = null
+) {
+    val estimatedTotal: BigDecimal get() = items.mapNotNull { it.lineTotal }.fold(BigDecimal.ZERO, BigDecimal::add)
+}
+
+fun generatedLoadNote(state: FormUiState, language: String): String {
+    val type = when {
+        language == "ar" && state.systemType == "Hybrid" -> "هجين"
+        language == "ckb" && state.systemType == "Hybrid" -> "هایبرید"
+        else -> state.systemType
+    }
+    return if (language == "ar") "منظومة شمسية بقدرة ${state.capacity} كيلو واط نوع $type يتحمل كالآتي:\n- بالنهار من ${state.dayFrom} الى ${state.dayTo} امبير\n- بالليل ${state.nightAmps} امبير لمدة ${state.nightHours} ساعات\n- وفي حالات الضرورة يتحمل ${state.emergencyAmps} امبير لمدة ${state.emergencyDuration}"
+    else if (language == "ckb") "سیستەمێکی خۆرەوی بە توانای ${state.capacity} کیلۆوات، جۆری $type:\n- ڕۆژانە لە ${state.dayFrom} بۆ ${state.dayTo} ئەمپێر\n- شەوانە ${state.nightAmps} ئەمپێر بۆ ${state.nightHours} کاتژمێر\n- لە کاتی پێویستدا ${state.emergencyAmps} ئەمپێر بۆ ${state.emergencyDuration}"
+    else "${state.capacity} kW $type solar system load profile:\n- Day: ${state.dayFrom} to ${state.dayTo} A\n- Night: ${state.nightAmps} A for ${state.nightHours} hours\n- Emergency: ${state.emergencyAmps} A for ${state.emergencyDuration}"
+}
+
+fun validationErrors(state: FormUiState): Set<String> = buildSet {
+    if (state.clientName.isBlank()) add("client")
+    if (state.phone.isBlank()) add("phone")
+    if (state.location.isBlank()) add("location")
+    if (state.date.isBlank()) add("date")
+    if (state.capacity.isBlank()) add("capacity")
+    if (state.items.isEmpty()) add("items")
+    if (state.organizerName.isBlank()) add("organizer")
+}
+
+===== FormViewModel.kt =====
+package com.infinitygreenpower.organizerform.feature.form
+
+import android.app.Application
+import android.net.Uri
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.createSavedStateHandle
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.infinitygreenpower.organizerform.core.model.RememberedPrice
+import com.infinitygreenpower.organizerform.core.model.prefillFor
+import com.infinitygreenpower.organizerform.data.db.CatalogItemEntity
+import com.infinitygreenpower.organizerform.data.db.FormAggregate
+import com.infinitygreenpower.organizerform.data.db.FormEntity
+import com.infinitygreenpower.organizerform.data.db.FormItemEntity
+import com.infinitygreenpower.organizerform.data.db.FormPhotoEntity
+import com.infinitygreenpower.organizerform.data.db.LoadNoteEntity
+import com.infinitygreenpower.organizerform.data.db.OrganizerDatabase
+import com.infinitygreenpower.organizerform.data.db.OrganizerEntity
+import com.infinitygreenpower.organizerform.data.preferences.AppPreferences
+import com.infinitygreenpower.organizerform.data.repository.FormRepository
+import java.io.File
+import java.math.BigDecimal
+import java.util.UUID
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+
+class FormViewModel(
+    application: Application,
+    private val initialFormId: String? = null,
+    private val savedStateHandle: SavedStateHandle
+) : AndroidViewModel(application) {
+    private val database = OrganizerDatabase.get(application)
+    private val forms = FormRepository(database)
+    private val appPreferences = AppPreferences(application)
+    val catalog = database.catalogDao().observeAll()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val organizers = database.organizerDao().observeAll()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val mutableState = MutableStateFlow(FormUiState())
+    val state = mutableState
+    private var initialized = false
+    private var workingIsDraft = initialFormId == null
+    private var autoSaveJob: Job? = null
+
+    init {
+        viewModelScope.launch {
+            val activeCurrency = appPreferences.settings.first().currency
+            val aggregate = initialFormId?.let { forms.observe(it).first() } ?: forms.observeActiveDraft().first()
+            if (aggregate != null) {
+                workingIsDraft = aggregate.form.isDraft
+                mutableState.value = aggregate.toUi(activeCurrency).copy(step = savedStateHandle[STEP_KEY] ?: 1)
+            } else {
+                val defaultOrganizer = database.organizerDao().getDefault()
+                mutableState.value = mutableState.value.copy(
+                    currency = activeCurrency,
+                    organizerId = defaultOrganizer?.id,
+                    organizerName = defaultOrganizer?.name.orEmpty()
+                )
+            }
+            initialized = true
+        }
+    }
+
+    fun update(block: FormUiState.() -> FormUiState) {
+        applyUpdate(block, autoSave = true)
+    }
+
+    fun goTo(step: Int) {
+        applyUpdate({ copy(step = step.coerceIn(1, 5)) }, autoSave = false)
+        persist()
+    }
+
+    fun saveDraft() {
+        persist(if (workingIsDraft) "Draft saved" else "Changes saved")
+    }
+
+    fun saveForm() = viewModelScope.launch {
+        autoSaveJob?.cancel()
+        if (persistSafely(isDraft = false, successMessage = "Form saved")) {
+            workingIsDraft = false
+            if (initialFormId == null) {
+                val currency = state.value.currency
+                val defaultOrganizer = database.organizerDao().getDefault()
+                workingIsDraft = true
+                mutableState.value = FormUiState(
+                    currency = currency,
+                    organizerId = defaultOrganizer?.id,
+                    organizerName = defaultOrganizer?.name.orEmpty(),
+                    message = "Form saved"
+                )
+                savedStateHandle[STEP_KEY] = 1
+            }
+        }
+    }
+
+    fun clearMessage() {
+        mutableState.value = state.value.copy(message = null)
+    }
+
+    fun preview() {
+        val errors = validationErrors(state.value)
+        if (errors.isEmpty()) {
+            applyUpdate({ copy(step = 5) }, autoSave = false)
+            persist()
+        } else {
+            mutableState.value = state.value.copy(
+                errors = errors,
+                message = "Complete the highlighted required fields"
+            )
+        }
+    }
+
+    fun addCatalogItem(item: CatalogItemEntity) = viewModelScope.launch {
+        val price = item.lastUsedUnitPrice?.let {
+            RememberedPrice(it, item.lastUsedCurrency.orEmpty()).prefillFor(state.value.currency)
+        }.orEmpty()
+        update {
+            copy(items = items + DraftItem(
+                catalogId = item.id,
+                name = item.name,
+                category = item.category,
+                specification = item.legacyDescription,
+                unitPrice = price
+            ))
+        }
+    }
+
+    fun addCustom(name: String, category: String, quantity: Int, price: String) {
+        update {
+            copy(items = items + DraftItem(
+                name = name.ifBlank { "Custom item" },
+                category = category.ifBlank { "Custom" },
+                quantity = quantity.coerceAtLeast(1),
+                unitPrice = price
+            ))
+        }
+    }
+
+    fun changeQuantity(id: String, delta: Int) {
+        update { copy(items = items.map { if (it.id == id) it.copy(quantity = (it.quantity + delta).coerceAtLeast(1)) else it }) }
+    }
+
+    fun updateItem(item: DraftItem) {
+        update { copy(items = items.map { if (it.id == item.id) item else it }) }
+    }
+
+    fun removeItem(id: String) {
+        update { copy(items = items.filterNot { it.id == id }) }
+    }
+
+    fun saveOrganizer(name: String, phone: String, makeDefault: Boolean = false) = viewModelScope.launch {
+        val now = System.currentTimeMillis()
+        val organizer = OrganizerEntity(
+            UUID.randomUUID().toString(), name.trim(), phone.trim().ifBlank { null }, makeDefault, now, now
+        )
+        if (makeDefault) database.organizerDao().clearDefault()
+        database.organizerDao().upsert(organizer)
+        update { copy(organizerId = organizer.id, organizerName = organizer.name) }
+    }
+
+    fun updateOrganizer(organizer: OrganizerEntity, name: String, phone: String, makeDefault: Boolean) =
+        viewModelScope.launch {
+            if (makeDefault) database.organizerDao().clearDefault()
+            val updated = organizer.copy(
+                name = name.trim(),
+                phone = phone.trim().ifBlank { null },
+                isDefault = makeDefault,
+                updatedAt = System.currentTimeMillis()
+            )
+            database.organizerDao().upsert(updated)
+            if (state.value.organizerId == updated.id) update { copy(organizerName = updated.name) }
+        }
+
+    fun setDefaultOrganizer(organizer: OrganizerEntity) = viewModelScope.launch {
+        database.organizerDao().clearDefault()
+        database.organizerDao().upsert(organizer.copy(isDefault = true, updatedAt = System.currentTimeMillis()))
+    }
+
+    fun deleteOrganizer(organizer: OrganizerEntity) = viewModelScope.launch {
+        database.organizerDao().delete(organizer.id)
+        if (state.value.organizerId == organizer.id) update { copy(organizerId = null, organizerName = "") }
+    }
+
+    fun selectOrganizer(organizer: OrganizerEntity) {
+        update { copy(organizerId = organizer.id, organizerName = organizer.name) }
+    }
+
+    fun importPhotos(uris: List<Uri>) = viewModelScope.launch {
+        val context = getApplication<Application>()
+        val directory = File(context.filesDir, "photos/${state.value.id}").apply { mkdirs() }
+        val added = uris.mapNotNull { uri ->
+            runCatching {
+                val id = UUID.randomUUID().toString()
+                val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+                val extension = if (mime.contains("png")) "png" else "jpg"
+                val file = File(directory, "$id.$extension")
+                val input = context.contentResolver.openInputStream(uri) ?: error("Photo stream unavailable")
+                input.use { source -> file.outputStream().use(source::copyTo) }
+                DraftPhoto(id, file.absolutePath, file.name, mime)
+            }.getOrNull()
+        }
+        applyUpdate({
+            copy(
+                photos = photos + added,
+                message = if (added.size < uris.size) "Some photos could not be imported" else null
+            )
+        }, autoSave = false)
+        persistSafely(workingIsDraft)
+    }
+
+    fun togglePhoto(id: String) {
+        update { copy(photos = photos.map { if (it.id == id) it.copy(included = !it.included) else it }) }
+    }
+
+    fun movePhoto(id: String, delta: Int) {
+        update {
+            val list = photos.toMutableList()
+            val from = list.indexOfFirst { it.id == id }
+            if (from < 0) return@update this
+            val to = (from + delta).coerceIn(0, list.lastIndex)
+            if (from != to) list.add(to, list.removeAt(from))
+            copy(photos = list)
+        }
+    }
+
+    fun removePhoto(id: String) = viewModelScope.launch {
+        val photo = state.value.photos.firstOrNull { it.id == id } ?: return@launch
+        applyUpdate({ copy(photos = photos.filterNot { it.id == id }) }, autoSave = false)
+        if (persistSafely(workingIsDraft)) runCatching { File(photo.path).delete() }
+    }
+
+    private fun applyUpdate(block: FormUiState.() -> FormUiState, autoSave: Boolean) {
+        mutableState.value = mutableState.value.block().copy(errors = emptySet(), message = null)
+        savedStateHandle[STEP_KEY] = mutableState.value.step
+        if (autoSave && initialized) scheduleAutoSave()
+    }
+
+    private fun scheduleAutoSave() {
+        autoSaveJob?.cancel()
+        autoSaveJob = viewModelScope.launch {
+            delay(AUTO_SAVE_DELAY_MS)
+            persistSafely(workingIsDraft)
+        }
+    }
+
+    private fun persist(message: String? = null) {
+        autoSaveJob?.cancel()
+        viewModelScope.launch { persistSafely(workingIsDraft, message) }
+    }
+
+    private suspend fun persistSafely(isDraft: Boolean, successMessage: String? = null): Boolean =
+        runCatching {
+            persistNow(isDraft)
+            if (successMessage != null) mutableState.value = state.value.copy(message = successMessage)
+        }.fold(
+            onSuccess = { true },
+            onFailure = {
+                mutableState.value = state.value.copy(message = "Could not save changes. Please try again.")
+                false
+            }
+        )
+
+    private suspend fun persistNow(isDraft: Boolean) {
+        val snapshot = state.value
+        val now = System.currentTimeMillis()
+        forms.save(
+            FormEntity(
+                id = snapshot.id,
+                legacyId = snapshot.legacyId,
+                clientName = snapshot.clientName,
+                phone = snapshot.phone,
+                location = snapshot.location,
+                formDate = snapshot.date,
+                systemType = snapshot.systemType,
+                capacity = snapshot.capacity,
+                phase = snapshot.phase,
+                organizerId = snapshot.organizerId,
+                organizerSnapshotName = snapshot.organizerName,
+                customNote = snapshot.customNote,
+                createdAt = snapshot.createdAt,
+                updatedAt = now,
+                isDraft = isDraft,
+                migratedFromLegacy = snapshot.migratedFromLegacy,
+                schemaVersion = snapshot.schemaVersion
+            ),
+            snapshot.items.mapIndexed { index, item ->
+                FormItemEntity(
+                    item.id, snapshot.id, item.catalogId, item.name, item.category, item.specification,
+                    item.quantity.toString(), item.unitPrice.ifBlank { null }, snapshot.currency, index
+                )
+            },
+            snapshot.photos.mapIndexed { index, photo ->
+                FormPhotoEntity(
+                    photo.id, snapshot.id, photo.path, photo.displayName, photo.mimeType,
+                    photo.included, index, importedAt = now
+                )
+            },
+            LoadNoteEntity(
+                snapshot.id, snapshot.capacity, snapshot.systemType, snapshot.dayFrom, snapshot.dayTo,
+                snapshot.nightAmps, snapshot.nightHours, snapshot.emergencyAmps, snapshot.emergencyDuration
+            )
+        )
+        snapshot.items.filter { it.catalogId != null }.forEach { item ->
+            val validPrice = item.unitPrice.toBigDecimalOrNull()?.takeIf { it >= BigDecimal.ZERO }?.toPlainString()
+            database.catalogDao().rememberUse(item.catalogId!!, now, validPrice, snapshot.currency)
+        }
+        mutableState.value = state.value.copy(updatedAt = now)
+    }
+
+    companion object {
+        private const val AUTO_SAVE_DELAY_MS = 400L
+        private const val STEP_KEY = "form_step"
+
+        fun factory(application: Application, formId: String?): ViewModelProvider.Factory = viewModelFactory {
+            initializer { FormViewModel(application, formId, createSavedStateHandle()) }
+        }
+    }
+}
+
+private fun FormAggregate.toUi(activeCurrency: String) = FormUiState(
+    id = form.id,
+    legacyId = form.legacyId,
+    migratedFromLegacy = form.migratedFromLegacy,
+    schemaVersion = form.schemaVersion,
+    createdAt = form.createdAt,
+    updatedAt = form.updatedAt,
+    clientName = form.clientName,
+    phone = form.phone,
+    location = form.location,
+    date = form.formDate,
+    systemType = form.systemType,
+    capacity = form.capacity,
+    phase = form.phase,
+    organizerId = form.organizerId,
+    organizerName = form.organizerSnapshotName,
+    customNote = form.customNote,
+    currency = items.firstOrNull()?.currency ?: activeCurrency,
+    items = items.sortedBy { it.sortOrder }.map {
+        DraftItem(
+            it.id, it.catalogItemId, it.itemNameSnapshot, it.categorySnapshot,
+            it.specificationSnapshot, it.quantity.toIntOrNull() ?: 1, it.unitPrice.orEmpty()
+        )
+    },
+    photos = photos.sortedBy { it.sortOrder }.map {
+        DraftPhoto(it.id, it.relativePath, it.displayName, it.mimeType, it.includeInPdf)
+    },
+    dayFrom = loadNote?.dayFromAmps.orEmpty(),
+    dayTo = loadNote?.dayToAmps.orEmpty(),
+    nightAmps = loadNote?.nightAmps.orEmpty(),
+    nightHours = loadNote?.nightHours.orEmpty(),
+    emergencyAmps = loadNote?.emergencyAmps.orEmpty(),
+    emergencyDuration = loadNote?.emergencyDuration.orEmpty()
+)
+
+===== FormScreen.kt 440-700 =====
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (pageCount > 0) {
+                            Text(
+                                tr(
+                                    lang,
+                                    "Page ${pageIndex + 1} of $pageCount",
+                                    "الصفحة ${pageIndex + 1} من $pageCount",
+                                    "لاپەڕە ${pageIndex + 1} لە $pageCount"
+                                ),
+                                color = Muted,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                    IconButton(onDismiss) { Icon(Icons.Outlined.Close, contentDescription = null, tint = Navy) }
+                }
+                HorizontalDivider()
+                Box(
+                    Modifier.fillMaxWidth().weight(1f).padding(12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    when {
+                        loading -> CircularProgressIndicator()
+                        error != null -> Text(error.orEmpty(), color = Danger)
+                        bitmap != null -> Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            shadowElevation = 4.dp,
+                            color = androidx.compose.ui.graphics.Color.White
+                        ) {
+                            Image(
+                                bitmap!!.asImageBitmap(),
+                                contentDescription = tr(lang, "PDF page", "صفحة PDF", "لاپەڕەی PDF"),
+                                modifier = Modifier.fillMaxSize().padding(4.dp),
+                                contentScale = ContentScale.Fit
+                            )
+                        }
+                    }
+                }
+                Row(
+                    Modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { pageIndex = (pageIndex - 1).coerceAtLeast(0) },
+                        enabled = !loading && pageIndex > 0,
+                        modifier = Modifier.weight(1f)
+                    ) { Text(tr(lang, "Previous", "السابق", "پێشوو")) }
+                    Button(
+                        onClick = { pageIndex = (pageIndex + 1).coerceAtMost((pageCount - 1).coerceAtLeast(0)) },
+                        enabled = !loading && pageCount > 0 && pageIndex < pageCount - 1,
+                        modifier = Modifier.weight(1f)
+                    ) { Text(tr(lang, "Next", "التالي", "دواتر")) }
+                }
+            }
+        }
+    }
+}
+
+@Composable private fun FormActions(step:Int,lang:String,onSave:()->Unit,onBack:()->Unit,onContinue:()->Unit){Surface(Modifier.imePadding(),shadowElevation=6.dp){Column(Modifier.navigationBarsPadding().padding(12.dp)){OutlinedButton(onSave,Modifier.fillMaxWidth().testTag("save-draft")){Icon(Icons.Outlined.Save,null);Text(tr(lang,"Save Draft","حفظ المسودة","ڕەشنووس پاشەکەوت بکە"))};CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr){Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)){if(step>1)OutlinedButton(onBack,Modifier.weight(1f)){Text(tr(lang,"Back","رجوع","گەڕانەوە"),textAlign=TextAlign.Center)};PrimaryButton(if(step==4)tr(lang,"Preview Form","معاينة الاستمارة","پێشبینینی فۆرم")else tr(lang,"Continue","متابعة","بەردەوام بە"),onContinue,Modifier.weight(1f))}}}}}
+@Composable private fun Field(value:String,onValue:(String)->Unit,label:String,error:Boolean=false,keyboard:KeyboardType=KeyboardType.Text,singleLine:Boolean=true){OutlinedTextField(value,onValue,Modifier.fillMaxWidth().padding(vertical=5.dp),label={Text(label)},isError=error,singleLine=singleLine,keyboardOptions=KeyboardOptions(keyboardType=keyboard),shape=RoundedCornerShape(15.dp))}
+@Composable private fun MiniField(value:String,onValue:(String)->Unit,label:String,modifier:Modifier){OutlinedTextField(value,onValue,modifier.padding(vertical=4.dp),label={Text(label,fontSize=10.sp)},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Decimal),singleLine=true)}
+@Composable
+private fun Segment(
+    values: List<String>,
+    selected: String,
+    labelFor: (String) -> String = { it },
+    onSelect: (String) -> Unit
+) {
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            values.forEachIndexed { i, v ->
+                val isSelected = selected == v
+                SegmentedButton(
+                    checked = isSelected,
+                    onCheckedChange = { onSelect(v) },
+                    shape = SegmentedButtonDefaults.itemShape(i, values.size),
+                    modifier = Modifier.weight(1f).heightIn(min = 62.dp),
+                    icon = {}
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            labelFor(v),
+                            fontSize = 10.5.sp,
+                            lineHeight = 13.sp,
+                            maxLines = 2,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Text(
+                            if (isSelected) "✓" else " ",
+                            fontSize = 13.sp,
+                            lineHeight = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+private fun systemTypeLabel(value:String,lang:String)=when(value){
+    "Hybrid"->tr(lang,"Hybrid","هجين","هایبرید")
+    "On-Grid"->tr(lang,"On-Grid","متصل بالشبكة","پەیوەست بە تۆڕ")
+    "Off-Grid"->tr(lang,"Off-Grid","منفصل عن الشبكة","ناپەیوەست بە تۆڕ")
+    else->value
+}
+private fun phaseLabel(value:String,lang:String)=when(value){
+    "Single Phase"->tr(lang,"Single Phase","أحادي الطور","یەک فاز")
+    "Three Phase"->tr(lang,"Three Phase","ثلاثي الطور","سێ فاز")
+    else->value
+}
+@Composable private fun Summary(label:String,value:String){Row(Modifier.fillMaxWidth().padding(vertical=5.dp),horizontalArrangement=Arrangement.SpaceBetween){Text(label,color=Muted);Text(value,color=Navy,fontWeight=FontWeight.Medium)}}
+private fun decodeThumbnail(path:String):android.graphics.Bitmap?{val bounds=BitmapFactory.Options().apply{inJustDecodeBounds=true};BitmapFactory.decodeFile(path,bounds);if(bounds.outWidth<=0||bounds.outHeight<=0)return null;var sample=1;while(bounds.outWidth/sample>320||bounds.outHeight/sample>320)sample*=2;return BitmapFactory.decodeFile(path,BitmapFactory.Options().apply{inSampleSize=sample})}
+
+@OptIn(ExperimentalMaterial3Api::class) @Composable private fun CatalogSheet(catalog:List<CatalogItemEntity>,lang:String,onDismiss:()->Unit,onAdd:(CatalogItemEntity)->Unit){var q by remember{mutableStateOf("")};ModalBottomSheet(onDismiss){Column(Modifier.fillMaxHeight(.85f).padding(16.dp)){Text(tr(lang,"Product Catalog","كتالوج المنتجات","کاتەلۆگی بەرهەم"),fontSize=22.sp,fontWeight=FontWeight.Bold);Field(q,{q=it},tr(lang,"Search","بحث","گەڕان"));LazyColumn{items(catalog.filter{q.isBlank()||it.name.contains(q,true)||it.category.contains(q,true)},key={it.id}){x->ListItem(headlineContent={Text(x.name)},supportingContent={Text(x.category)},trailingContent={IconButton({onAdd(x)}){Icon(Icons.Outlined.AddCircle,null,tint=InfinityTeal)}})}}}}}
+@OptIn(ExperimentalMaterial3Api::class) @Composable private fun ItemEditorSheet(base:DraftItem,lang:String,onDismiss:()->Unit,onSave:(DraftItem)->Unit){var item by remember{mutableStateOf(base)};ModalBottomSheet(onDismiss){Column(Modifier.padding(18.dp).imePadding()){Text(tr(lang,"Add / Edit Material","إضافة / تعديل مادة","زیادکردن / دەستکاری ماددە"),fontSize=21.sp,fontWeight=FontWeight.Bold);Field(item.name,{item=item.copy(name=it)},tr(lang,"Item name","اسم المادة","ناوی ماددە"));Field(item.category,{item=item.copy(category=it)},tr(lang,"Category","الفئة","پۆل"));Field(item.quantity.toString(),{item=item.copy(quantity=it.toIntOrNull()?.coerceAtLeast(1)?:1)},tr(lang,"Quantity","الكمية","بڕ"),keyboard=KeyboardType.Number);Field(item.unitPrice,{item=item.copy(unitPrice=it)},tr(lang,"Unit price (optional)","سعر الوحدة","نرخی دانە"),keyboard=KeyboardType.Decimal);PrimaryButton(tr(lang,"Save Material","حفظ المادة","ماددە پاشەکەوت بکە"),{onSave(item)},Modifier.fillMaxWidth())}}}
+@OptIn(ExperimentalMaterial3Api::class) @Composable private fun OrganizerSheet(organizers:List<OrganizerEntity>,lang:String,onDismiss:()->Unit,onSelect:(OrganizerEntity)->Unit,onAdd:(String,String,Boolean)->Unit,onUpdate:(OrganizerEntity,String,String,Boolean)->Unit,onDefault:(OrganizerEntity)->Unit,onDelete:(OrganizerEntity)->Unit){var name by remember{mutableStateOf("")};var phone by remember{mutableStateOf("")};var makeDefault by remember{mutableStateOf(false)};var editing by remember{mutableStateOf<OrganizerEntity?>(null)};var deleting by remember{mutableStateOf<OrganizerEntity?>(null)};fun clearEditor(){editing=null;name="";phone="";makeDefault=false};ModalBottomSheet(onDismissRequest=onDismiss){LazyColumn(Modifier.padding(18.dp).imePadding()){item{Text(tr(lang,"Choose Organizer","اختيار المنظم","ڕێکخەر هەڵبژێرە"),fontSize=21.sp,fontWeight=FontWeight.Bold)};items(organizers,key={it.id}){o->Card(Modifier.fillMaxWidth().padding(vertical=4.dp),colors=CardDefaults.cardColors(containerColor=androidx.compose.ui.graphics.Color.White)){Column(Modifier.padding(10.dp)){Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Column{Text(o.name,fontWeight=FontWeight.SemiBold);Text(o.phone.orEmpty(),fontSize=12.sp,color=Muted)};if(o.isDefault)AssistChip({},label={Text(tr(lang,"Default","افتراضي","بنەڕەت"))})};Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.End){TextButton({onSelect(o)}){Text(tr(lang,"Select","اختيار","هەڵبژێرە"))};IconButton({onDefault(o)}){Icon(if(o.isDefault)Icons.Outlined.Star else Icons.Outlined.StarBorder,tr(lang,"Set default","تعيين افتراضي","بنەڕەت دیاری بکە"))};IconButton({editing=o;name=o.name;phone=o.phone.orEmpty();makeDefault=o.isDefault}){Icon(Icons.Outlined.Edit,tr(lang,"Edit","تعديل","دەستکاری"))};IconButton({deleting=o}){Icon(Icons.Outlined.Delete,tr(lang,"Delete","حذف","سڕینەوە"),tint=Danger)}}}}};item{HorizontalDivider(Modifier.padding(vertical=12.dp));Text(if(editing==null)tr(lang,"Add Organizer","إضافة منظم","زیادکردنی ڕێکخەر")else tr(lang,"Edit Organizer","تعديل المنظم","دەستکاری ڕێکخەر"),fontWeight=FontWeight.Bold);Field(name,{name=it},tr(lang,"Name","الاسم","ناو"));Field(phone,{phone=it},tr(lang,"Phone (optional)","الهاتف (اختياري)","تەلەفۆن (ئارەزوومەندانە)"),keyboard=KeyboardType.Phone);Row(verticalAlignment=Alignment.CenterVertically){Checkbox(makeDefault,{makeDefault=it});Text(tr(lang,"Use as default","استخدام كافتراضي","وەک بنەڕەت بەکاریبهێنە"))};PrimaryButton(if(editing==null)tr(lang,"Add and Select","إضافة واختيار","زیادکردن و هەڵبژاردن")else tr(lang,"Save Changes","حفظ التعديلات","گۆڕانکارییەکان پاشەکەوت بکە"),{if(name.isNotBlank()){editing?.let{onUpdate(it,name,phone,makeDefault)}?:onAdd(name,phone,makeDefault);clearEditor()}},Modifier.fillMaxWidth());if(editing!=null)TextButton(::clearEditor,Modifier.fillMaxWidth()){Text(tr(lang,"Cancel Edit","إلغاء التعديل","دەستکاری هەڵبوەشێنەوە"))}}}};deleting?.let{o->AlertDialog(onDismissRequest={deleting=null},title={Text(tr(lang,"Delete organizer?","حذف المنظم؟","ڕێکخەر بسڕدرێتەوە؟"))},text={Text(o.name)},confirmButton={TextButton({onDelete(o);deleting=null}){Text(tr(lang,"Delete","حذف","سڕینەوە"),color=Danger)}},dismissButton={TextButton({deleting=null}){Text(tr(lang,"Cancel","إلغاء","هەڵوەشاندنەوە"))}})}}
+
+===== PdfExporter.kt relevant =====
+64:            writer.materials(s, settings)
+67:                writer.section(t(resolvedLang, "Load / Notes", "التحميل / الملاحظات", "بار / تێبینی"), keepNext = 40)
+68:                writer.paragraph(generatedLoadNote(s, resolvedLang))
+69:                if (s.customNote.isNotBlank()) writer.paragraph(s.customNote)
+317:        fun materials(s: FormUiState, settings: Settings) {
+318:            section(t(lang, "Required Materials", "المواد المطلوبة", "ماددە پێویستەکان"), keepNext = 54)
+319:            materialHeader(settings)
+321:            s.items.forEachIndexed { index, item ->
+323:                val quantityWidth = 60
+326:                val quantityX: Int
+329:                    // True RTL table order: item/specification on the right, then quantity, then unit price.
+331:                    quantityX = left + priceWidth
+332:                    itemX = quantityX + quantityWidth
+335:                    quantityX = left + itemWidth
+336:                    priceX = quantityX + quantityWidth
+341:                val specification = item.specification.trim()
+343:                val specHeight = if (specification.isBlank()) 0 else measure(
+344:                    specification,
+352:                ensure(rowHeight) { materialHeader(settings) }
+358:                if (specification.isNotBlank()) {
+360:                        specification,
+371:                val quantity = item.quantity.toString()
+372:                val quantityHeight = measure(quantity, quantityWidth, 9, true, Layout.Alignment.ALIGN_CENTER)
+374:                    quantity,
+375:                    quantityX.toFloat(),
+376:                    y + ((rowHeight - quantityHeight) / 2),
+377:                    quantityWidth,
+401:                val firstDivider = if (rtl) itemX else quantityX
+404:                    val secondDivider = if (rtl) quantityX else priceX
+411:                val hasAnyEnteredPrice = s.items.any { it.unitPrice.toBigDecimalOrNull() != null }
+419:        private fun materialHeader(settings: Settings) {
+421:            val quantityWidth = 60
+424:            val quantityX: Int
+428:                quantityX = left + priceWidth
+429:                itemX = quantityX + quantityWidth
+432:                quantityX = left + itemWidth
+433:                priceX = quantityX + quantityWidth
+453:                quantityX.toFloat(),
+455:                quantityWidth,
+475:            val firstDivider = if (rtl) itemX else quantityX
+478:                val secondDivider = if (rtl) quantityX else priceX
+530:        fun paragraph(text: String) {
+571:                paragraph(t(lang, "Photo unavailable", "الصورة غير متوفرة", "وێنە بەردەست نییە"))
+636:            // ALIGN_NORMAL follows the paragraph's start edge: right for Arabic/Kurdish, left for English.
+696:            s.customNote,
+697:            s.items.map {
+702:                    it.quantity.toString(),
+
+===== FormExportModel.kt =====
+package com.infinitygreenpower.organizerform.export.json
+
+import org.json.JSONArray
+import org.json.JSONObject
+
+data class ExportItem(val catalogId: String?, val category: String, val name: String, val quantity: String, val unitPrice: String?, val currency: String, val lineTotal: String?)
+data class ExportPhoto(val order: Int, val includeInPdf: Boolean, val displayName: String)
+data class FormExport(
+    val id: String,
+    val createdAt: String,
+    val updatedAt: String,
+    val date: String,
+    val companyName: String,
+    val clientName: String,
+    val phone: String,
+    val location: String,
+    val systemType: String,
+    val requiredCapacity: String,
+    val phase: String,
+    val organizerName: String,
+    val dayFromAmps: String,
+    val dayToAmps: String,
+    val nightAmps: String,
+    val nightHours: String,
+    val emergencyAmps: String,
+    val emergencyDuration: String,
+    val customNote: String,
+    val items: List<ExportItem>,
+    val estimatedTotal: String?,
+    val currency: String,
+    val photos: List<ExportPhoto>,
+    val appVersion: String
+) {
+    fun toJson(): String = JSONObject().apply {
+        put("schema_version", 1)
+        put("form_type", "organizer_preliminary_solar_form")
+        put("app", JSONObject().put("name", "IGP Organizer Form").put("version", appVersion))
+        put("form", JSONObject().put("id", id).put("created_at", createdAt).put("updated_at", updatedAt).put("date", date))
+        put("company", JSONObject().put("name", companyName))
+        put("client", JSONObject().put("name", clientName).put("phone", phone).put("location", location))
+        put("system", JSONObject().put("type", systemType).put("required_capacity", requiredCapacity).put("phase", phase))
+        put("inspection", JSONObject().put("organizer_name", organizerName))
+        put("load_note", JSONObject().put("day_from_amps", dayFromAmps).put("day_to_amps", dayToAmps).put("night_amps", nightAmps).put("night_hours", nightHours).put("emergency_amps", emergencyAmps).put("emergency_duration", emergencyDuration).put("custom_note", customNote))
+        put("items", JSONArray().apply { items.forEach { item -> put(JSONObject().put("catalog_id", item.catalogId ?: JSONObject.NULL).put("category", item.category).put("name", item.name).put("quantity", item.quantity).put("unit_price", item.unitPrice ?: JSONObject.NULL).put("currency", item.currency).put("line_total", item.lineTotal ?: JSONObject.NULL)) } })
+        put("estimated_total", JSONObject().put("amount", estimatedTotal ?: JSONObject.NULL).put("currency", currency))
+        put("photos", JSONArray().apply { photos.forEach { photo -> put(JSONObject().put("order", photo.order).put("include_in_pdf", photo.includeInPdf).put("display_name", photo.displayName)) } })
+    }.toString(2)
+}
+
+===== Entities.kt =====
+package com.infinitygreenpower.organizerform.data.db
+
+import androidx.room.Entity
+import androidx.room.ForeignKey
+import androidx.room.Index
+import androidx.room.PrimaryKey
+
+@Entity(tableName = "forms", indices = [Index("legacyId", unique = true)])
+data class FormEntity(
+    @PrimaryKey val id: String,
+    val legacyId: String? = null,
+    val clientName: String = "",
+    val phone: String = "",
+    val location: String = "",
+    val formDate: String = "",
+    val systemType: String = "Hybrid",
+    val capacity: String = "",
+    val phase: String = "Single Phase",
+    val organizerId: String? = null,
+    val organizerSnapshotName: String = "",
+    val customNote: String = "",
+    val createdAt: Long,
+    val updatedAt: Long,
+    val isDraft: Boolean = true,
+    val migratedFromLegacy: Boolean = false,
+    val schemaVersion: Int = 1
+)
+
+@Entity(
+    tableName = "form_items",
+    foreignKeys = [ForeignKey(entity = FormEntity::class, parentColumns = ["id"], childColumns = ["formId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("formId"), Index("catalogItemId")]
+)
+data class FormItemEntity(
+    @PrimaryKey val id: String,
+    val formId: String,
+    val catalogItemId: String? = null,
+    val itemNameSnapshot: String,
+    val categorySnapshot: String,
+    val specificationSnapshot: String = "",
+    val quantity: String,
+    val unitPrice: String? = null,
+    val currency: String,
+    val sortOrder: Int
+)
+
+@Entity(
+    tableName = "load_notes",
+    foreignKeys = [ForeignKey(entity = FormEntity::class, parentColumns = ["id"], childColumns = ["formId"], onDelete = ForeignKey.CASCADE)]
+)
+data class LoadNoteEntity(
+    @PrimaryKey val formId: String,
+    val systemCapacity: String = "",
+    val systemType: String = "Hybrid",
+    val dayFromAmps: String = "",
+    val dayToAmps: String = "",
+    val nightAmps: String = "",
+    val nightHours: String = "",
+    val emergencyAmps: String = "",
+    val emergencyDuration: String = ""
+)
+
+@Entity(
+    tableName = "form_photos",
+    foreignKeys = [ForeignKey(entity = FormEntity::class, parentColumns = ["id"], childColumns = ["formId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("formId")]
+)
+data class FormPhotoEntity(
+    @PrimaryKey val id: String,
+    val formId: String,
+    val relativePath: String,
+    val displayName: String,
+    val mimeType: String,
+    val includeInPdf: Boolean = true,
+    val sortOrder: Int,
+    val width: Int? = null,
+    val height: Int? = null,
+    val importedAt: Long,
+    val unavailable: Boolean = false,
+    val error: String? = null
+)
+
+@Entity(tableName = "organizers")
+data class OrganizerEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val phone: String? = null,
+    val isDefault: Boolean = false,
+    val createdAt: Long,
+    val updatedAt: Long
+)
+
+@Entity(tableName = "catalog_items", indices = [Index("category"), Index("name")])
+data class CatalogItemEntity(
+    @PrimaryKey val id: String,
+    val category: String,
+    val name: String,
+    val legacyDescription: String,
+    val sourceVersion: Int = 4,
+    val favorite: Boolean = false,
+    val lastUsedAt: Long? = null,
+    val lastUsedUnitPrice: String? = null,
+    val lastUsedCurrency: String? = null
+)
+
+@Entity(tableName = "migration_reports")
+data class MigrationReportEntity(
+    @PrimaryKey val id: String,
+    val startedAt: Long,
+    val completedAt: Long,
+    val sourceRecords: Int,
+    val importedRecords: Int,
+    val skippedRecords: Int,
+    val settingsImported: Boolean,
+    val status: String,
+    val details: String
+)
+
+===== Daos.kt =====
+package com.infinitygreenpower.organizerform.data.db
+
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.Query
+import androidx.room.Transaction
+import androidx.room.Update
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface FormDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(form: FormEntity)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertItems(items: List<FormItemEntity>)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertPhotos(photos: List<FormPhotoEntity>)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertLoadNote(note: LoadNoteEntity)
+    @Query("DELETE FROM form_items WHERE formId = :formId") suspend fun deleteItems(formId: String)
+    @Query("DELETE FROM form_photos WHERE formId = :formId") suspend fun deletePhotos(formId: String)
+    @Transaction @Query("SELECT * FROM forms WHERE id = :id") fun observe(id: String): Flow<FormAggregate?>
+    @Transaction @Query("SELECT * FROM forms WHERE isDraft = 1 ORDER BY updatedAt DESC LIMIT 1") fun observeActiveDraft(): Flow<FormAggregate?>
+    @Query("SELECT * FROM forms WHERE isDraft = 0 ORDER BY updatedAt DESC") fun observeSaved(): Flow<List<FormEntity>>
+    @Transaction @Query("SELECT * FROM forms WHERE isDraft = 0 ORDER BY updatedAt DESC") fun observeSavedAggregates(): Flow<List<FormAggregate>>
+    @Query("UPDATE forms SET isDraft = :isDraft, updatedAt = :updatedAt WHERE id = :id") suspend fun setDraft(id: String, isDraft: Boolean, updatedAt: Long)
+    @Query("DELETE FROM forms WHERE id = :id") suspend fun delete(id: String)
+    @Query("SELECT COUNT(*) FROM forms") suspend fun countAll(): Int
+    @Query("SELECT COUNT(*) FROM forms WHERE migratedFromLegacy = 1") suspend fun countMigrated(): Int
+    @Query("SELECT COUNT(*) FROM forms WHERE legacyId = :legacyId") suspend fun countByLegacyId(legacyId: String): Int
+    @Query("SELECT COUNT(*) FROM forms WHERE legacyId IN (:legacyIds)") suspend fun countByLegacyIds(legacyIds: List<String>): Int
+}
+
+@Dao
+interface CatalogDao {
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertSeed(items: List<CatalogItemEntity>): List<Long>
+    @Query("SELECT COUNT(*) FROM catalog_items") suspend fun count(): Int
+    @Query("SELECT * FROM catalog_items ORDER BY category, name") fun observeAll(): Flow<List<CatalogItemEntity>>
+    @Query("SELECT * FROM catalog_items WHERE id = :id LIMIT 1") suspend fun get(id: String): CatalogItemEntity?
+    @Query("SELECT * FROM catalog_items WHERE favorite = 1 ORDER BY name") fun observeFavorites(): Flow<List<CatalogItemEntity>>
+    @Query("SELECT * FROM catalog_items WHERE lastUsedAt IS NOT NULL ORDER BY lastUsedAt DESC LIMIT :limit") fun observeRecent(limit: Int = 20): Flow<List<CatalogItemEntity>>
+    @Query("UPDATE catalog_items SET favorite = :favorite WHERE id = :id") suspend fun setFavorite(id: String, favorite: Boolean)
+    @Query("UPDATE catalog_items SET lastUsedAt = :usedAt, lastUsedUnitPrice = :price, lastUsedCurrency = :currency WHERE id = :id") suspend fun rememberUse(id: String, usedAt: Long, price: String?, currency: String?)
+    @Query("UPDATE catalog_items SET lastUsedAt = NULL") suspend fun clearRecent()
+    @Query("UPDATE catalog_items SET favorite = 0") suspend fun clearFavorites()
+    @Query("SELECT * FROM catalog_items WHERE name = :name LIMIT 1") suspend fun findByName(name: String): CatalogItemEntity?
+    @Query("UPDATE catalog_items SET favorite = 1 WHERE name IN (:names)") suspend fun markFavoritesByName(names: List<String>)
+    @Query("UPDATE catalog_items SET lastUsedAt = :usedAt WHERE name = :name") suspend fun markRecentByName(name: String, usedAt: Long)
+}
+
+@Dao
+interface OrganizerDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(organizer: OrganizerEntity)
+    @Update suspend fun update(organizer: OrganizerEntity)
+    @Query("SELECT * FROM organizers ORDER BY isDefault DESC, name") fun observeAll(): Flow<List<OrganizerEntity>>
+    @Query("UPDATE organizers SET isDefault = 0") suspend fun clearDefault()
+    @Query("SELECT * FROM organizers WHERE isDefault = 1 LIMIT 1") suspend fun getDefault(): OrganizerEntity?
+    @Query("DELETE FROM organizers WHERE id = :id") suspend fun delete(id: String)
+}
+
+@Dao
+interface MigrationReportDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(report: MigrationReportEntity)
+    @Query("SELECT * FROM migration_reports ORDER BY completedAt DESC LIMIT 1") fun observeLatest(): Flow<MigrationReportEntity?>
+}
