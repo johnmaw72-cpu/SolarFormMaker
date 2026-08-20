@@ -1,0 +1,85 @@
+name: Temporary RC13 APK Build Legacy Trigger
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply RC13 source changes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          lines=Path('.github/workflows/temp-rc13-build.yml').read_text().splitlines()
+          start=None
+          for i,line in enumerate(lines):
+              if line.strip() == '- name: Reconstruct RC12 source and apply RC13 New Form fix':
+                  start=i
+                  break
+          assert start is not None
+          run=None
+          for i in range(start+1,len(lines)):
+              if lines[i].strip() == 'run: |':
+                  run=i+1
+                  break
+          assert run is not None
+          out=[]
+          for line in lines[run:]:
+              if line.startswith('      - uses: actions/setup-java'):
+                  break
+              if line.startswith('          '): line=line[10:]
+              out.append(line)
+          p=Path('/tmp/apply_rc13.sh'); p.write_text('\n'.join(out)+'\n')
+          subprocess.run(['bash',str(p)],check=True)
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 36
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+      - name: Build RC13 APK
+        working-directory: /tmp/igp-build/IGP
+        env:
+          IGP_PREVIEW_KEYSTORE: /tmp/igp-preview-test.jks
+          IGP_PREVIEW_STORE_PASSWORD: IGPPreview2026!
+          IGP_PREVIEW_KEY_ALIAS: igp-preview
+          IGP_PREVIEW_KEY_PASSWORD: IGPPreview2026!
+        run: gradle --no-daemon clean assembleDebug
+      - name: Verify RC13 APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=/tmp/igp-build/IGP/app/build/outputs/apk/debug/app-debug.apk
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          BADGING=$("$AAPT" dump badging "$APK" | head -n 1)
+          echo "$BADGING"
+          echo "$BADGING" | grep "name='com.infinitygreenpower.offerstudio.preview'"
+          echo "$BADGING" | grep "versionCode='47'"
+          echo "$BADGING" | grep "versionName='5.0.0-rc13-test'"
+          "$APKSIGNER" verify --print-certs "$APK" | tee /tmp/signing.txt
+          grep -qi '1f83a683d692d6530df5ba8e4ba1892e18bb11a313c5f744b464f3bf003c06f0' /tmp/signing.txt
+          unzip -t "$APK" >/dev/null
+          cp "$APK" IGP-Organizer-Form-5.0.0-rc13-New-Form-Draft-Fix.apk
+          sha256sum IGP-Organizer-Form-5.0.0-rc13-New-Form-Draft-Fix.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IGP-Organizer-Form-5.0.0-rc13-APK
+          path: IGP-Organizer-Form-5.0.0-rc13-New-Form-Draft-Fix.apk
+          retention-days: 7
