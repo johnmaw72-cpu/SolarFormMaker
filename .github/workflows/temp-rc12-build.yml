@@ -1,4 +1,4 @@
-name: Temporary RC13 APK Build Legacy Trigger
+name: Temporary RC14 APK Build
 
 on:
   pull_request:
@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
-      - name: Reconstruct RC12 and apply RC13 patch
+      - name: Reconstruct RC13 and apply RC14 patch
         shell: bash
         run: |
           set -euo pipefail
@@ -40,10 +40,15 @@ jobs:
           subprocess.run(['bash',str(p)],check=True)
           PY
           python build-input/rc13_patch.py /tmp/igp-build/IGP
+          python build-input/rc14_patch.py /tmp/igp-build/IGP
           grep -Fq 'contentWindowInsets = WindowInsets.safeDrawing' /tmp/igp-build/IGP/app/src/main/java/com/infinitygreenpower/organizerform/app/IGPOrganizerApp.kt
-          grep -Fq 'val note = if (item.approximate)' /tmp/igp-build/IGP/app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt
-          grep -Fq 'KeyboardType.Text' /tmp/igp-build/IGP/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
-          grep -Fq 'versionCode = 47' /tmp/igp-build/IGP/app/build.gradle.kts
+          grep -Fq 'android:windowSoftInputMode="adjustResize"' /tmp/igp-build/IGP/app/src/main/AndroidManifest.xml
+          grep -Fq 'var quantityText' /tmp/igp-build/IGP/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+          grep -Fq 'selectedCategory' /tmp/igp-build/IGP/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+          grep -Fq 'detectTransformGestures' /tmp/igp-build/IGP/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+          grep -Fq 'versionCode = 48' /tmp/igp-build/IGP/app/build.gradle.kts
+          rm -f /tmp/igp-preview-test.jks
+          cat build-input/v5_language_fix/preview-test-keystore.b64 | base64 -d > /tmp/igp-preview-test.jks
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -56,7 +61,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.4.1'
-      - name: Build RC13 APK
+      - name: Build RC14 APK
         working-directory: /tmp/igp-build/IGP
         env:
           IGP_PREVIEW_KEYSTORE: /tmp/igp-preview-test.jks
@@ -64,7 +69,7 @@ jobs:
           IGP_PREVIEW_KEY_ALIAS: igp-preview
           IGP_PREVIEW_KEY_PASSWORD: IGPPreview2026!
         run: gradle --no-daemon clean assembleDebug
-      - name: Verify RC13 APK
+      - name: Verify RC14 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -74,15 +79,15 @@ jobs:
           BADGING=$("$AAPT" dump badging "$APK" | head -n 1)
           echo "$BADGING"
           echo "$BADGING" | grep "name='com.infinitygreenpower.offerstudio.preview'"
-          echo "$BADGING" | grep "versionCode='47'"
-          echo "$BADGING" | grep "versionName='5.0.0-rc13-test'"
+          echo "$BADGING" | grep "versionCode='48'"
+          echo "$BADGING" | grep "versionName='5.0.0-rc14-test'"
           "$APKSIGNER" verify --print-certs "$APK" | tee /tmp/signing.txt
           grep -qi '1f83a683d692d6530df5ba8e4ba1892e18bb11a313c5f744b464f3bf003c06f0' /tmp/signing.txt
           unzip -t "$APK" >/dev/null
-          cp "$APK" IGP-Organizer-Form-5.0.0-rc13-New-Form-Draft-Fix.apk
-          sha256sum IGP-Organizer-Form-5.0.0-rc13-New-Form-Draft-Fix.apk
+          cp "$APK" IGP-Organizer-Form-5.0.0-rc14-CrossDevice-Input-PDF-Zoom-Fix.apk
+          sha256sum IGP-Organizer-Form-5.0.0-rc14-CrossDevice-Input-PDF-Zoom-Fix.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: IGP-Organizer-Form-5.0.0-rc13-APK
-          path: IGP-Organizer-Form-5.0.0-rc13-New-Form-Draft-Fix.apk
+          name: IGP-Organizer-Form-5.0.0-rc14-APK
+          path: IGP-Organizer-Form-5.0.0-rc14-CrossDevice-Input-PDF-Zoom-Fix.apk
           retention-days: 7
