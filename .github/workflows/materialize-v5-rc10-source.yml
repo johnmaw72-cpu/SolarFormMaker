@@ -1,0 +1,79 @@
+name: Materialize IGP RC10 Source Baseline
+
+on:
+  push:
+    branches: [chatgpt-v5-pdf-fix-build]
+    paths: ['.github/workflows/materialize-v5-rc10-source.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct current source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat build-input/v5_pdf_fix/source.b64.part* | base64 -d > /tmp/igp-source.zip
+          rm -rf /tmp/igp-build && mkdir -p /tmp/igp-build
+          unzip -q /tmp/igp-source.zip -d /tmp/igp-build || true
+          SRC=/tmp/igp-build/IGP/app/src
+          mkdir -p "$SRC/main"
+          for DIR in java res assets; do [ -d "$SRC/$DIR" ] && cp -a "$SRC/$DIR" "$SRC/main/" || true; done
+          [ -f "$SRC/AndroidManifest.xml" ] && cp "$SRC/AndroidManifest.xml" "$SRC/main/AndroidManifest.xml" || true
+          cp build-input/v5_pdf_fix/Relations.kt "$SRC/main/java/com/infinitygreenpower/organizerform/data/db/Relations.kt"
+          cat build-input/v5_language_fix/overlay.b64.part* | base64 -d > /tmp/rc3-overlay.tar.gz
+          tar -xzf /tmp/rc3-overlay.tar.gz -C /tmp/igp-build/IGP
+          cat build-input/v5_rc4_fix/overlay.b64.part* | base64 -d > /tmp/rc4-overlay.tar.gz
+          tar -xzf /tmp/rc4-overlay.tar.gz -C /tmp/igp-build/IGP
+          python - <<'PY'
+          import base64,zlib
+          from pathlib import Path
+          repo=Path.cwd(); root=Path('/tmp/igp-build/IGP')
+          mapping={
+            repo/'build-input/v5_rc9_fix/FormScreen.z9.b64': root/'app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt',
+            repo/'build-input/v5_rc8_fix/IGPOrganizerApp.z9.b64': root/'app/src/main/java/com/infinitygreenpower/organizerform/app/IGPOrganizerApp.kt',
+            repo/'build-input/v5_rc8_fix/SettingsScreen.z9.b64': root/'app/src/main/java/com/infinitygreenpower/organizerform/feature/settings/SettingsScreen.kt',
+            repo/'build-input/v5_rc8_fix/PdfExporter.z9.b64': root/'app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt',
+            repo/'build-input/v5_rc9_fix/CatalogScreen.z9.b64': root/'app/src/main/java/com/infinitygreenpower/organizerform/feature/catalog/CatalogScreen.kt',
+          }
+          for src,dst in mapping.items():
+            dst.parent.mkdir(parents=True,exist_ok=True)
+            dst.write_bytes(zlib.decompress(base64.b64decode(src.read_bytes())))
+          # Fix Material3 SegmentedButton API compile regression.
+          form=root/'app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt'
+          t=form.read_text()
+          t=t.replace('checked = isSelected,\n                    onCheckedChange = { onSelect(v) },','selected = isSelected,\n                    onClick = { onSelect(v) },')
+          form.write_text(t)
+          # Add DAO upsert required by RC9 catalog add/edit.
+          dao=root/'app/src/main/java/com/infinitygreenpower/organizerform/data/db/Daos.kt'
+          t=dao.read_text()
+          needle='@Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertSeed(items: List<CatalogItemEntity>): List<Long>'
+          if 'suspend fun upsert(item: CatalogItemEntity)' not in t:
+              t=t.replace(needle, needle+'\n    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(item: CatalogItemEntity)')
+          dao.write_text(t)
+          PY
+      - name: Copy editable baseline into repository
+        shell: bash
+        run: |
+          ROOT=/tmp/igp-build/IGP/app/src/main/java/com/infinitygreenpower/organizerform
+          OUT=build-input/v5_rc10_fix
+          mkdir -p "$OUT"
+          cp "$ROOT/feature/form/FormModels.kt" "$OUT/FormModels.kt"
+          cp "$ROOT/feature/form/FormViewModel.kt" "$OUT/FormViewModel.kt"
+          cp "$ROOT/feature/form/FormScreen.kt" "$OUT/FormScreen.kt"
+          cp "$ROOT/feature/catalog/CatalogScreen.kt" "$OUT/CatalogScreen.kt"
+          cp "$ROOT/export/pdf/PdfExporter.kt" "$OUT/PdfExporter.kt"
+          cp "$ROOT/export/json/FormExportModel.kt" "$OUT/FormExportModel.kt"
+          cp "$ROOT/data/db/Daos.kt" "$OUT/Daos.kt"
+          cp "$ROOT/app/IGPOrganizerApp.kt" "$OUT/IGPOrganizerApp.kt"
+          cp "$ROOT/feature/settings/SettingsScreen.kt" "$OUT/SettingsScreen.kt"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "$OUT"
+          git commit -m 'Materialize RC10 editable source baseline' || true
+          git push || true
