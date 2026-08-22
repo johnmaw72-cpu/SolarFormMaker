@@ -43,9 +43,9 @@ jobs:
           set -euo pipefail
           ROOT=/tmp/igp-build/IGP
           base64 -d build-input/rc17-clean.patch.gz.b64 > /tmp/rc17.patch.gz
-          echo '13a4b9fe5da80e93750daa4ea85cf657ba63837bd3d09ecbfc2aa368debc3207  /tmp/rc17.patch.gz' | sha256sum -c -
+          echo '836cf647a4c1ab42086075819b7bcc26cb74b32eacc67645e9b06cfd8e3f87f6  /tmp/rc17.patch.gz' | sha256sum -c -
           gzip -dc /tmp/rc17.patch.gz > /tmp/rc17.patch
-          echo 'e70b0b4a28e4bcec5f156442c8c6341f79a1e76500a77dd8ac60ebf0d86e68a9  /tmp/rc17.patch' | sha256sum -c -
+          echo '6809edb1da562e3c19f9536e701bdd70500c24b728ee5a5498ecf65030cbdb0e  /tmp/rc17.patch' | sha256sum -c -
           cd "$ROOT"
           patch -p1 < /tmp/rc17.patch
           cat > RC17_UPDATES.md <<'EOF'
