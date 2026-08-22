@@ -34,16 +34,11 @@ jobs:
         shell: bash
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "cmdline-tools;latest" "platform-tools" "build-tools;36.0.0"
-          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          "$SDKMANAGER" --list --channel=3 | tee "$RUNNER_TEMP/sdk-list.txt"
-          if grep -q "platforms;android-37" "$RUNNER_TEMP/sdk-list.txt"; then
-            "$SDKMANAGER" --channel=3 "platforms;android-37"
-          else
-            echo "API 37 package was not listed by the refreshed SDK manager. Preview candidates:"
-            grep -Ei "platforms;.*(37|cinnamon)" "$RUNNER_TEMP/sdk-list.txt" || true
-            exit 37
-          fi
+          sdkmanager "cmdline-tools;latest" "platform-tools" "build-tools;37.0.0"
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest-2/bin/sdkmanager"
+          test -x "$SDKMANAGER" || SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          "$SDKMANAGER" --channel=3 "platforms;android-37.0" "build-tools;37.0.0"
+          "$SDKMANAGER" --list --channel=3 | grep -E "platforms;android-37\.0|build-tools;37\.0\.0" | tee "$RUNNER_TEMP/sdk-list.txt"
 
       - name: Set up Gradle 9.5
         uses: gradle/actions/setup-gradle@v4
