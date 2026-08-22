@@ -43,7 +43,6 @@ jobs:
           set -euo pipefail
           ROOT=/tmp/igp-build/IGP
           cat build-input/rc17_overrides_b64/part*.txt > /tmp/rc17-overrides.tar.gz.b64
-          echo '696ee300717081b2bb3bfd854662474afd13668fba3f586735556bcf45dc5b2e  /tmp/rc17-overrides.tar.gz.b64' | sha256sum -c -
           base64 -d /tmp/rc17-overrides.tar.gz.b64 > /tmp/rc17-overrides.tar.gz
           echo '3816aaa8937bd1e3a394f2783e36f024d03e1c395ce3f19a197d106dc000b00f  /tmp/rc17-overrides.tar.gz' | sha256sum -c -
           tar -xzf /tmp/rc17-overrides.tar.gz -C "$ROOT"
