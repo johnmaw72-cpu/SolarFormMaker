@@ -30,15 +30,15 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install current Android SDK tools and API 37
+      - name: Install Android 37.0 platform
         shell: bash
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "cmdline-tools;latest" "platform-tools" "build-tools;37.0.0"
-          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest-2/bin/sdkmanager"
-          test -x "$SDKMANAGER" || SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/16.0/bin/sdkmanager"
           "$SDKMANAGER" --channel=3 "platforms;android-37.0" "build-tools;37.0.0"
           "$SDKMANAGER" --list --channel=3 | grep -E "platforms;android-37\.0|build-tools;37\.0\.0" | tee "$RUNNER_TEMP/sdk-list.txt"
+          test -f "$ANDROID_SDK_ROOT/platforms/android-37/android.jar"
 
       - name: Set up Gradle 9.5
         uses: gradle/actions/setup-gradle@v4
