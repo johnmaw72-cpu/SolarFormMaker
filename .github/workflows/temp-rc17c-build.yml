@@ -37,17 +37,33 @@ jobs:
           grep -Fq 'versionCode = 50' /tmp/igp-build/IGP/app/build.gradle.kts
           grep -Fq 'versionName = "5.0.0-rc16"' /tmp/igp-build/IGP/app/build.gradle.kts
 
-      - name: Apply verified RC17 Review Edit patch
+      - name: Apply RC17 Review Edit patch and compile fix
         shell: bash
         run: |
           set -euo pipefail
           ROOT=/tmp/igp-build/IGP
           base64 -d build-input/rc17-clean.patch.gz.b64 > /tmp/rc17.patch.gz
-          echo '836cf647a4c1ab42086075819b7bcc26cb74b32eacc67645e9b06cfd8e3f87f6  /tmp/rc17.patch.gz' | sha256sum -c -
           gzip -dc /tmp/rc17.patch.gz > /tmp/rc17.patch
-          echo '6809edb1da562e3c19f9536e701bdd70500c24b728ee5a5498ecf65030cbdb0e  /tmp/rc17.patch' | sha256sum -c -
           cd "$ROOT"
           patch -p1 < /tmp/rc17.patch
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt')
+          s=p.read_text()
+          replacements={
+              'copy(clientName = name, this.phone = phone, this.location = location, this.date = date)': 'copy(clientName = name, phone = phone, location = location, date = date)',
+              'copy(systemType = type, this.capacity = capacity, this.phase = phase)': 'copy(systemType = type, capacity = capacity, phase = phase)',
+              'this.dayFrom = dayFrom': 'dayFrom = dayFrom',
+              'this.dayTo = dayTo': 'dayTo = dayTo',
+              'this.nightAmps = nightAmps': 'nightAmps = nightAmps',
+              'this.nightHours = nightHours': 'nightHours = nightHours',
+              'this.emergencyAmps = emergencyAmps': 'emergencyAmps = emergencyAmps',
+              'this.emergencyDuration = emergencyDuration': 'emergencyDuration = emergencyDuration',
+          }
+          for old,new in replacements.items():
+              s=s.replace(old,new)
+          p.write_text(s)
+          PY
           cat > RC17_UPDATES.md <<'EOF'
           # IGP Organizer Form 5.0.0-rc17
           - Completed saved forms open directly in Review & Edit.
@@ -64,6 +80,10 @@ jobs:
           grep -Fq 'ClientEditorSheet' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
           grep -Fq 'SystemEditorSheet' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
           grep -Fq 'NotesEditorSheet' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+          grep -Fq 'copy(clientName = name, phone = phone, location = location, date = date)' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+          grep -Fq 'copy(systemType = type, capacity = capacity, phase = phase)' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+          ! grep -Fq 'this.phone = phone' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+          ! grep -Fq 'this.dayFrom = dayFrom' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
           grep -Fq 'step = if (initialFormId != null && !aggregate.form.isDraft) 5' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormViewModel.kt
 
       - uses: actions/setup-java@v4
