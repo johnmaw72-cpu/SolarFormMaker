@@ -1,0 +1,121 @@
+name: Temporary RC17C Exact Override Build
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-rc17c:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct exact RC16 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          lines = Path('.github/workflows/temp-rc16-build.yml').read_text().splitlines()
+          for name in ['Reconstruct exact RC14 source','Apply verified RC15 patch','Apply RC16 keyboard and preview fixes']:
+              start = next(i for i,l in enumerate(lines) if l.strip() == f'- name: {name}')
+              run = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == 'run: |')
+              body=[]
+              for line in lines[run+1:]:
+                  if line.startswith('      - name:') or line.startswith('      - uses:'):
+                      break
+                  body.append(line[10:] if line.startswith('          ') else line)
+              p=Path('/tmp')/(name.replace(' ','_')+'.sh')
+              p.write_text('\n'.join(body).rstrip()+'\n')
+              subprocess.run(['bash',str(p)],check=True)
+          PY
+          grep -Fq 'versionCode = 50' /tmp/igp-build/IGP/app/build.gradle.kts
+          grep -Fq 'versionName = "5.0.0-rc16"' /tmp/igp-build/IGP/app/build.gradle.kts
+
+      - name: Apply exact RC17 overrides
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/igp-build/IGP
+          cat build-input/rc17_overrides_b64/part*.txt > /tmp/rc17-overrides.tar.gz.b64
+          echo '696ee300717081b2bb3bfd854662474afd13668fba3f586735556bcf45dc5b2e  /tmp/rc17-overrides.tar.gz.b64' | sha256sum -c -
+          base64 -d /tmp/rc17-overrides.tar.gz.b64 > /tmp/rc17-overrides.tar.gz
+          echo '3816aaa8937bd1e3a394f2783e36f024d03e1c395ce3f19a197d106dc000b00f  /tmp/rc17-overrides.tar.gz' | sha256sum -c -
+          tar -xzf /tmp/rc17-overrides.tar.gz -C "$ROOT"
+          python - <<'PY'
+          from pathlib import Path
+          root=Path('/tmp/igp-build/IGP')
+          mirror=root/'app/src/java/com/infinitygreenpower/organizerform'
+          for rel in ['feature/form/FormScreen.kt','feature/form/FormViewModel.kt','feature/saved/SavedFormsScreen.kt']:
+              src=root/'app/src/main/java/com/infinitygreenpower/organizerform'/rel
+              dst=mirror/rel
+              if dst.parent.exists():
+                  dst.write_text(src.read_text())
+          PY
+          grep -Fq 'versionCode = 51' "$ROOT/app/build.gradle.kts"
+          grep -Fq 'versionName = "5.0.0-rc17"' "$ROOT/app/build.gradle.kts"
+          grep -Fq 'Review & Edit' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt"
+          grep -Fq 'clientEdit' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt"
+          grep -Fq 'systemEdit' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt"
+          grep -Fq 'notesEdit' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Prepare RC16-compatible preview signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d build-input/v5_language_fix/preview-test-keystore.b64 > /tmp/igp-preview-test.jks
+          RC16=.github/workflows/temp-rc16-build.yml
+          echo "IGP_PREVIEW_KEYSTORE=/tmp/igp-preview-test.jks" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_STORE_PASSWORD=$(awk -F': ' '/IGP_PREVIEW_STORE_PASSWORD:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_ALIAS=$(awk -F': ' '/IGP_PREVIEW_KEY_ALIAS:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_PASSWORD=$(awk -F': ' '/IGP_PREVIEW_KEY_PASSWORD:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+
+      - name: Build RC17 APK
+        working-directory: /tmp/igp-build/IGP
+        run: gradle --no-daemon clean assembleDebug
+
+      - name: Verify and stage RC17 APK and source
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=/tmp/igp-build/IGP/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee /tmp/badging.txt
+          grep -Fq "package: name='com.infinitygreenpower.offerstudio.preview' versionCode='51' versionName='5.0.0-rc17-test'" /tmp/badging.txt
+          cp "$APK" "$GITHUB_WORKSPACE/IGP-Organizer-Form-5.0.0-rc17-Review-Edit.apk"
+          cd /tmp/igp-build
+          find IGP -type d \( -name build -o -name .gradle \) -prune -exec rm -rf {} + || true
+          zip -qr "$GITHUB_WORKSPACE/IGP-Organizer-Form-5.0.0-rc17-source.zip" IGP
+          cd "$GITHUB_WORKSPACE"
+          sha256sum IGP-Organizer-Form-5.0.0-rc17-Review-Edit.apk IGP-Organizer-Form-5.0.0-rc17-source.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IGP-Organizer-Form-5.0.0-rc17-APK-and-Source
+          path: |
+            IGP-Organizer-Form-5.0.0-rc17-Review-Edit.apk
+            IGP-Organizer-Form-5.0.0-rc17-source.zip
+          if-no-files-found: error
+          retention-days: 7
