@@ -1,0 +1,152 @@
+name: Temporary RC18 PDF Direct Edit Build
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-rc18:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct exact RC16 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          lines = Path('.github/workflows/temp-rc16-build.yml').read_text().splitlines()
+          for name in ['Reconstruct exact RC14 source','Apply verified RC15 patch','Apply RC16 keyboard and preview fixes']:
+              start = next(i for i,l in enumerate(lines) if l.strip() == f'- name: {name}')
+              run = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == 'run: |')
+              body=[]
+              for line in lines[run+1:]:
+                  if line.startswith('      - name:') or line.startswith('      - uses:'):
+                      break
+                  body.append(line[10:] if line.startswith('          ') else line)
+              p=Path('/tmp')/(name.replace(' ','_')+'.sh')
+              p.write_text('\n'.join(body).rstrip()+'\n')
+              subprocess.run(['bash',str(p)],check=True)
+          PY
+          grep -Fq 'versionCode = 50' /tmp/igp-build/IGP/app/build.gradle.kts
+          grep -Fq 'versionName = "5.0.0-rc16"' /tmp/igp-build/IGP/app/build.gradle.kts
+
+      - name: Reconstruct exact RC17 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/igp-build/IGP
+          cat build-input/rc17_clean_parts/part*.txt > /tmp/rc17.patch.gz.b64
+          base64 -d /tmp/rc17.patch.gz.b64 > /tmp/rc17.patch.gz
+          gzip -dc /tmp/rc17.patch.gz > /tmp/rc17.patch
+          cd "$ROOT"
+          patch -p1 < /tmp/rc17.patch
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt')
+          s=p.read_text()
+          replacements={
+              'copy(clientName = name, this.phone = phone, this.location = location, this.date = date)': 'copy(clientName = name, phone = phone, location = location, date = date)',
+              'copy(systemType = type, this.capacity = capacity, this.phase = phase)': 'copy(systemType = type, capacity = capacity, phase = phase)',
+              'this.dayFrom = dayFrom': 'dayFrom = dayFrom',
+              'this.dayTo = dayTo': 'dayTo = dayTo',
+              'this.nightAmps = nightAmps': 'nightAmps = nightAmps',
+              'this.nightHours = nightHours': 'nightHours = nightHours',
+              'this.emergencyAmps = emergencyAmps': 'emergencyAmps = emergencyAmps',
+              'this.emergencyDuration = emergencyDuration': 'emergencyDuration = emergencyDuration',
+          }
+          for old,new in replacements.items(): s=s.replace(old,new)
+          p.write_text(s)
+          PY
+          grep -Fq 'versionCode = 51' app/build.gradle.kts
+          grep -Fq 'versionName = "5.0.0-rc17"' app/build.gradle.kts
+          grep -Fq 'Review & Edit' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+
+      - name: Apply RC18 direct PDF editing patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/igp-build/IGP
+          cat build-input/rc18_pdf_edit_parts/part*.txt > /tmp/rc18.patch.gz.b64
+          base64 -d /tmp/rc18.patch.gz.b64 > /tmp/rc18.patch.gz
+          echo 'e0bba240f412dff2a838a25f11fbbd3c4059f9a276ad775fbfe6c68436d07c83  /tmp/rc18.patch.gz' | sha256sum -c -
+          gzip -dc /tmp/rc18.patch.gz > /tmp/rc18.patch
+          echo '20803444c42d6e9a92d5e3c8476a7fc2fcd5095e21c3e81d67044d58e79438c7  /tmp/rc18.patch' | sha256sum -c -
+          cd "$ROOT"
+          patch -p1 < /tmp/rc18.patch
+          cat > RC18_UPDATES.md <<'DOC'
+          # IGP Organizer Form 5.0.0-rc18
+          - PDF preview is now editable, not view-only.
+          - Edit / + controls are overlaid directly on the rendered PDF.
+          - Client, system, organizer, materials, notes and photos can be changed from the PDF preview.
+          - Materials can be added from catalog or as custom items from the preview.
+          - The PDF regenerates automatically after changes.
+          - versionCode 52 / versionName 5.0.0-rc18.
+          DOC
+          grep -Fq 'versionCode = 52' app/build.gradle.kts
+          grep -Fq 'versionName = "5.0.0-rc18"' app/build.gradle.kts
+          grep -Fq 'PdfEditSection' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+          grep -Fq 'Tap the edit / + buttons directly on the PDF' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+          grep -Fq 'PdfQuickEditorPanel' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Prepare RC17-compatible preview signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d build-input/v5_language_fix/preview-test-keystore.b64 > /tmp/igp-preview-test.jks
+          RC16=.github/workflows/temp-rc16-build.yml
+          echo "IGP_PREVIEW_KEYSTORE=/tmp/igp-preview-test.jks" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_STORE_PASSWORD=$(awk -F': ' '/IGP_PREVIEW_STORE_PASSWORD:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_ALIAS=$(awk -F': ' '/IGP_PREVIEW_KEY_ALIAS:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_PASSWORD=$(awk -F': ' '/IGP_PREVIEW_KEY_PASSWORD:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+
+      - name: Build RC18 APK
+        working-directory: /tmp/igp-build/IGP
+        run: gradle --no-daemon clean assembleDebug
+
+      - name: Verify and stage RC18 APK and source
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=/tmp/igp-build/IGP/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee /tmp/badging.txt
+          grep -Fq "package: name='com.infinitygreenpower.offerstudio.preview' versionCode='52' versionName='5.0.0-rc18-test'" /tmp/badging.txt
+          cp "$APK" "$GITHUB_WORKSPACE/IGP-Organizer-Form-5.0.0-rc18-PDF-Direct-Edit.apk"
+          cd /tmp/igp-build
+          find IGP -type d \( -name build -o -name .gradle \) -prune -exec rm -rf {} + || true
+          zip -qr "$GITHUB_WORKSPACE/IGP-Organizer-Form-5.0.0-rc18-source.zip" IGP
+          cd "$GITHUB_WORKSPACE"
+          sha256sum IGP-Organizer-Form-5.0.0-rc18-PDF-Direct-Edit.apk IGP-Organizer-Form-5.0.0-rc18-source.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IGP-Organizer-Form-5.0.0-rc18-APK-and-Source
+          path: |
+            IGP-Organizer-Form-5.0.0-rc18-PDF-Direct-Edit.apk
+            IGP-Organizer-Form-5.0.0-rc18-source.zip
+          if-no-files-found: error
+          retention-days: 7
