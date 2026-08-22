@@ -79,7 +79,7 @@ jobs:
           gzip -dc /tmp/rc18.patch.gz > /tmp/rc18.patch
           echo '20803444c42d6e9a92d5e3c8476a7fc2fcd5095e21c3e81d67044d58e79438c7  /tmp/rc18.patch' | sha256sum -c -
           cd "$ROOT"
-          patch -p1 < /tmp/rc18.patch
+          patch -p3 < /tmp/rc18.patch
           cat > RC18_UPDATES.md <<'DOC'
           # IGP Organizer Form 5.0.0-rc18
           - PDF preview is now editable, not view-only.
