@@ -38,7 +38,8 @@ jobs:
           SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/16.0/bin/sdkmanager"
           "$SDKMANAGER" --channel=3 "platforms;android-37.0" "build-tools;37.0.0"
           "$SDKMANAGER" --list --channel=3 | grep -E "platforms;android-37\.0|build-tools;37\.0\.0" | tee "$RUNNER_TEMP/sdk-list.txt"
-          test -f "$ANDROID_SDK_ROOT/platforms/android-37/android.jar"
+          test -f "$ANDROID_SDK_ROOT/platforms/android-37.0/android.jar"
+          ls -lh "$ANDROID_SDK_ROOT/platforms/android-37.0/android.jar"
 
       - name: Set up Gradle 9.5
         uses: gradle/actions/setup-gradle@v4
