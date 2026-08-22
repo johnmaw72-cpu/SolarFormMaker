@@ -30,11 +30,20 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK packages
+      - name: Install current Android SDK tools and API 37
         shell: bash
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --channel=3 "platform-tools" "platforms;android-37" "build-tools;36.0.0"
+          sdkmanager "cmdline-tools;latest" "platform-tools" "build-tools;36.0.0"
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          "$SDKMANAGER" --list --channel=3 | tee "$RUNNER_TEMP/sdk-list.txt"
+          if grep -q "platforms;android-37" "$RUNNER_TEMP/sdk-list.txt"; then
+            "$SDKMANAGER" --channel=3 "platforms;android-37"
+          else
+            echo "API 37 package was not listed by the refreshed SDK manager. Preview candidates:"
+            grep -Ei "platforms;.*(37|cinnamon)" "$RUNNER_TEMP/sdk-list.txt" || true
+            exit 37
+          fi
 
       - name: Set up Gradle 9.5
         uses: gradle/actions/setup-gradle@v4
@@ -59,30 +68,25 @@ jobs:
           root = Path("${{ runner.temp }}/pdfstudio-src")
           src = root / "app/src/main/java/com/pdfstudio/pro"
 
-          # Tesseract4Android 4.9.0 exposes PageIteratorLevel as TessBaseAPI.PageIteratorLevel.
           p = src / "ocr/TesseractOcrEngine.kt"
           s = p.read_text()
           s = s.replace("import com.googlecode.tesseract.android.PageIteratorLevel", "import com.googlecode.tesseract.android.TessBaseAPI.PageIteratorLevel")
           p.write_text(s)
 
-          # Material3 uses Button; the old generated sources incorrectly referred to FilledButton.
           for p in (src / "ui").glob("*.kt"):
               s = p.read_text()
               if "FilledButton" in s:
                   p.write_text(s.replace("FilledButton", "Button"))
 
-          # Correct the extended material icon name.
           p = src / "ui/AiAssistantScreen.kt"
           s = p.read_text().replace("import androidx.compose.material.icons.outlined.Paste", "import androidx.compose.material.icons.outlined.ContentPaste")
           s = s.replace("Icons.Outlined.Paste", "Icons.Outlined.ContentPaste")
           p.write_text(s)
 
-          # Modifier.weight is scope-provided; importing its internal backing symbol breaks newer Compose.
           p = src / "ui/ObjectEditorScreen.kt"
           s = p.read_text().replace("import androidx.compose.foundation.layout.weight\n", "")
           p.write_text(s)
 
-          # StrokeCap lives in androidx.compose.ui.graphics; opt in to ModalBottomSheet's Material3 API.
           p = src / "ui/SignatureUi.kt"
           s = p.read_text().replace("import androidx.compose.ui.graphics.drawscope.StrokeCap", "import androidx.compose.ui.graphics.StrokeCap")
           if "import androidx.compose.material3.ExperimentalMaterial3Api" not in s:
@@ -90,7 +94,6 @@ jobs:
           s = s.replace("@Composable\nfun FillAndSignSheet(", "@OptIn(ExperimentalMaterial3Api::class)\n@Composable\nfun FillAndSignSheet(")
           p.write_text(s)
 
-          # Avoid callback-name shadowing inside Fragment.apply receiver.
           p = src / "ui/EditablePdfViewer.kt"
           s = p.read_text()
           marker = "    var fragment by remember { mutableStateOf<StudioEditablePdfViewerFragment?>(null) }\n"
@@ -118,7 +121,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: PDF-Studio-build-log
-          path: ${{ runner.temp }}/build.log
+          path: |
+            ${{ runner.temp }}/build.log
+            ${{ runner.temp }}/sdk-list.txt
           if-no-files-found: warn
           retention-days: 1
 
