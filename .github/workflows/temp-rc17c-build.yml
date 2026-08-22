@@ -1,4 +1,4 @@
-name: Temporary RC17C Exact Override Build
+name: Temporary RC17 Clean Patch Build
 
 on:
   pull_request:
@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  build-rc17c:
+  build-rc17:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -37,31 +37,34 @@ jobs:
           grep -Fq 'versionCode = 50' /tmp/igp-build/IGP/app/build.gradle.kts
           grep -Fq 'versionName = "5.0.0-rc16"' /tmp/igp-build/IGP/app/build.gradle.kts
 
-      - name: Apply exact RC17 overrides
+      - name: Apply verified RC17 Review Edit patch
         shell: bash
         run: |
           set -euo pipefail
           ROOT=/tmp/igp-build/IGP
-          cat build-input/rc17_overrides_b64/part*.txt > /tmp/rc17-overrides.tar.gz.b64
-          base64 -d /tmp/rc17-overrides.tar.gz.b64 > /tmp/rc17-overrides.tar.gz
-          echo '3816aaa8937bd1e3a394f2783e36f024d03e1c395ce3f19a197d106dc000b00f  /tmp/rc17-overrides.tar.gz' | sha256sum -c -
-          tar -xzf /tmp/rc17-overrides.tar.gz -C "$ROOT"
-          python - <<'PY'
-          from pathlib import Path
-          root=Path('/tmp/igp-build/IGP')
-          mirror=root/'app/src/java/com/infinitygreenpower/organizerform'
-          for rel in ['feature/form/FormScreen.kt','feature/form/FormViewModel.kt','feature/saved/SavedFormsScreen.kt']:
-              src=root/'app/src/main/java/com/infinitygreenpower/organizerform'/rel
-              dst=mirror/rel
-              if dst.parent.exists():
-                  dst.write_text(src.read_text())
-          PY
-          grep -Fq 'versionCode = 51' "$ROOT/app/build.gradle.kts"
-          grep -Fq 'versionName = "5.0.0-rc17"' "$ROOT/app/build.gradle.kts"
-          grep -Fq 'Review & Edit' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt"
-          grep -Fq 'clientEdit' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt"
-          grep -Fq 'systemEdit' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt"
-          grep -Fq 'notesEdit' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt"
+          base64 -d build-input/rc17-clean.patch.gz.b64 > /tmp/rc17.patch.gz
+          echo '13a4b9fe5da80e93750daa4ea85cf657ba63837bd3d09ecbfc2aa368debc3207  /tmp/rc17.patch.gz' | sha256sum -c -
+          gzip -dc /tmp/rc17.patch.gz > /tmp/rc17.patch
+          echo 'e70b0b4a28e4bcec5f156442c8c6341f79a1e76500a77dd8ac60ebf0d86e68a9  /tmp/rc17.patch' | sha256sum -c -
+          cd "$ROOT"
+          patch -p1 < /tmp/rc17.patch
+          cat > RC17_UPDATES.md <<'EOF'
+          # IGP Organizer Form 5.0.0-rc17
+          - Completed saved forms open directly in Review & Edit.
+          - Edit client, system, organizer, materials, notes and site photos without returning through the creation steps.
+          - Materials support catalog add, custom add, edit, replace and remove.
+          - PDF preview/save/share stays on the Review & Edit page and uses current data.
+          - Saving keeps the completed form open.
+          - Android back from Review & Edit returns to Saved Forms.
+          - versionCode 51 / versionName 5.0.0-rc17.
+          EOF
+          grep -Fq 'versionCode = 51' app/build.gradle.kts
+          grep -Fq 'versionName = "5.0.0-rc17"' app/build.gradle.kts
+          grep -Fq 'Review & Edit' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+          grep -Fq 'ClientEditorSheet' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+          grep -Fq 'SystemEditorSheet' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+          grep -Fq 'NotesEditorSheet' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+          grep -Fq 'step = if (initialFormId != null && !aggregate.form.isDraft) 5' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormViewModel.kt
 
       - uses: actions/setup-java@v4
         with:
