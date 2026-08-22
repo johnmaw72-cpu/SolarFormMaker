@@ -13,8 +13,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+
     steps:
-      - name: Checkout
+      - name: Checkout isolated build branch
         uses: actions/checkout@v4
 
       - name: Set up Java 17
@@ -37,21 +38,25 @@ jobs:
         with:
           gradle-version: '9.5.0'
 
-      - name: Restore PDF Studio Pro source
+      - name: Restore PDF Studio Pro 1.0.0-rc1 source
         shell: bash
         run: |
-          python3 - <<'PY'
-          import base64, pathlib
-          data = '''UEsDBBQAAAAIABFlPVx/lw6hAAAA7gAAABAAAABQREYtU3R1ZGlvLVByby1NMTAuZ2l0aWdub3JlVY/NCsIwEITvPkV6b5oUevKKF7GC2kybD2ptu5FFvLttg4LW9DD7zW+GPeGIkaoI76ONVUiN8B2jBqYa58PryJmBe0wFmlQ4nL00KE1ci9VYcYwC0DHMtkogMs5xUCeorXMKN5LaDC4To8daZQ30Iw6GI3ev8lj2fKw+sGs1jpmo2ToDncgxix0S5pJR5I6d0nM17P7/RZT1Okt5QSwECFAMUAAAACAARZT1cf5cOoQAAAO4AAAAQAAAAAAAAAAAAAACAAQAAAABQREYtU3R1ZGlvLVByby1NMTAuZ2l0aWdub3JlUEsDBBQAAAAIABFlPVzYP51amwAAAJcBAAAWAAAAUERG...'''
-          pathlib.Path("$RUNNER_TEMP/pdfstudio.zip").write_bytes(base64.b64decode(data))
-          PY
+          cat pdfstudio-buildparts/p*.b64 | base64 --decode > "$RUNNER_TEMP/pdfstudio.tar.zst"
+          echo "dbbfd8ea64c19f6f2375057bcd13e9abe81264bad7a638cd502246259794a1ef  $RUNNER_TEMP/pdfstudio.tar.zst" | sha256sum --check
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zstd
           mkdir -p "$RUNNER_TEMP/pdfstudio-src"
-          unzip -q "$RUNNER_TEMP/pdfstudio.zip" -d "$RUNNER_TEMP/pdfstudio-src"
-          test -f "$RUNNER_TEMP/pdfstudio-src/PDF-Studio-Pro-M10/settings.gradle.kts"
+          zstd -d -q "$RUNNER_TEMP/pdfstudio.tar.zst" -o "$RUNNER_TEMP/pdfstudio.tar"
+          tar -xf "$RUNNER_TEMP/pdfstudio.tar" -C "$RUNNER_TEMP/pdfstudio-src"
+          if [ -d pdfstudio-patches ]; then
+            cp -R pdfstudio-patches/. "$RUNNER_TEMP/pdfstudio-src/"
+          fi
+          test -f "$RUNNER_TEMP/pdfstudio-src/settings.gradle.kts"
+          test -f "$RUNNER_TEMP/pdfstudio-src/app/build.gradle.kts"
 
       - name: Build installable debug APK
         shell: bash
-        working-directory: ${{ runner.temp }}/pdfstudio-src/PDF-Studio-Pro-M10
+        working-directory: ${{ runner.temp }}/pdfstudio-src
         run: |
           gradle --no-daemon --stacktrace :app:assembleDebug
 
@@ -59,14 +64,17 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/apk-out"
-          cp "$RUNNER_TEMP/pdfstudio-src/PDF-Studio-Pro-M10/app/build/outputs/apk/debug/app-debug.apk" \
+          cp "$RUNNER_TEMP/pdfstudio-src/app/build/outputs/apk/debug/app-debug.apk" \
              "$RUNNER_TEMP/apk-out/PDF-Studio-Pro-1.0.0-rc1-Test.apk"
-          sha256sum "$RUNNER_TEMP/apk-out/PDF-Studio-Pro-1.0.0-rc1-Test.apk"
+          sha256sum "$RUNNER_TEMP/apk-out/PDF-Studio-Pro-1.0.0-rc1-Test.apk" | tee "$RUNNER_TEMP/apk-out/SHA256.txt"
+          ls -lh "$RUNNER_TEMP/apk-out/PDF-Studio-Pro-1.0.0-rc1-Test.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: PDF-Studio-Pro-1.0.0-rc1-APK
-          path: ${{ runner.temp }}/apk-out/PDF-Studio-Pro-1.0.0-rc1-Test.apk
+          path: |
+            ${{ runner.temp }}/apk-out/PDF-Studio-Pro-1.0.0-rc1-Test.apk
+            ${{ runner.temp }}/apk-out/SHA256.txt
           if-no-files-found: error
           retention-days: 7
