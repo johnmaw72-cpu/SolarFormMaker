@@ -58,12 +58,27 @@ jobs:
           test -f "$RUNNER_TEMP/pdfstudio-src/app/build.gradle.kts"
 
       - name: Build installable debug APK
+        id: compile
         shell: bash
         working-directory: ${{ runner.temp }}/pdfstudio-src
         run: |
-          gradle --no-daemon --stacktrace :app:assembleDebug
+          set +e
+          gradle --no-daemon --stacktrace :app:assembleDebug > "$RUNNER_TEMP/build.log" 2>&1
+          status=$?
+          tail -n 300 "$RUNNER_TEMP/build.log"
+          exit $status
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDF-Studio-build-log
+          path: ${{ runner.temp }}/build.log
+          if-no-files-found: warn
+          retention-days: 1
 
       - name: Prepare APK artifact
+        if: success()
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/apk-out"
@@ -73,6 +88,7 @@ jobs:
           ls -lh "$RUNNER_TEMP/apk-out/PDF-Studio-Pro-1.0.0-rc1-Test.apk"
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: PDF-Studio-Pro-1.0.0-rc1-APK
