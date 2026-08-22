@@ -34,14 +34,14 @@ jobs:
         shell: bash
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          sdkmanager --channel=3 "platform-tools" "platforms;android-37" "build-tools;36.0.0"
 
       - name: Set up Gradle 9.5
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.5.0'
 
-      - name: Restore PDF Studio Pro 1.0.0-rc1 source
+      - name: Restore and patch PDF Studio Pro 1.0.0-rc1 source
         shell: bash
         run: |
           cat pdfstudio-buildparts/p*.b64 | base64 --decode > "$RUNNER_TEMP/pdfstudio.tar.zst"
@@ -54,6 +54,51 @@ jobs:
           if [ -d pdfstudio-patches ]; then
             cp -R pdfstudio-patches/. "$RUNNER_TEMP/pdfstudio-src/"
           fi
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path("${{ runner.temp }}/pdfstudio-src")
+          src = root / "app/src/main/java/com/pdfstudio/pro"
+
+          # Tesseract4Android 4.9.0 exposes PageIteratorLevel as TessBaseAPI.PageIteratorLevel.
+          p = src / "ocr/TesseractOcrEngine.kt"
+          s = p.read_text()
+          s = s.replace("import com.googlecode.tesseract.android.PageIteratorLevel", "import com.googlecode.tesseract.android.TessBaseAPI.PageIteratorLevel")
+          p.write_text(s)
+
+          # Material3 uses Button; the old generated sources incorrectly referred to FilledButton.
+          for p in (src / "ui").glob("*.kt"):
+              s = p.read_text()
+              if "FilledButton" in s:
+                  p.write_text(s.replace("FilledButton", "Button"))
+
+          # Correct the extended material icon name.
+          p = src / "ui/AiAssistantScreen.kt"
+          s = p.read_text().replace("import androidx.compose.material.icons.outlined.Paste", "import androidx.compose.material.icons.outlined.ContentPaste")
+          s = s.replace("Icons.Outlined.Paste", "Icons.Outlined.ContentPaste")
+          p.write_text(s)
+
+          # Modifier.weight is scope-provided; importing its internal backing symbol breaks newer Compose.
+          p = src / "ui/ObjectEditorScreen.kt"
+          s = p.read_text().replace("import androidx.compose.foundation.layout.weight\n", "")
+          p.write_text(s)
+
+          # StrokeCap lives in androidx.compose.ui.graphics; opt in to ModalBottomSheet's Material3 API.
+          p = src / "ui/SignatureUi.kt"
+          s = p.read_text().replace("import androidx.compose.ui.graphics.drawscope.StrokeCap", "import androidx.compose.ui.graphics.StrokeCap")
+          if "import androidx.compose.material3.ExperimentalMaterial3Api" not in s:
+              s = s.replace("import androidx.compose.material3.Button\n", "import androidx.compose.material3.Button\nimport androidx.compose.material3.ExperimentalMaterial3Api\n")
+          s = s.replace("@Composable\nfun FillAndSignSheet(", "@OptIn(ExperimentalMaterial3Api::class)\n@Composable\nfun FillAndSignSheet(")
+          p.write_text(s)
+
+          # Avoid callback-name shadowing inside Fragment.apply receiver.
+          p = src / "ui/EditablePdfViewer.kt"
+          s = p.read_text()
+          marker = "    var fragment by remember { mutableStateOf<StudioEditablePdfViewerFragment?>(null) }\n"
+          if "val saveCompletedCallback" not in s:
+              s = s.replace(marker, marker + "    val saveCompletedCallback = onSaveCompleted\n    val saveFailedCallback = onSaveFailed\n    val editModeChangedCallback = onEditModeChanged\n")
+          s = s.replace("                onSaveCompleted = onSaveCompleted\n                onSaveFailed = onSaveFailed\n                onEditModeChanged = onEditModeChanged\n", "                this.onSaveCompleted = saveCompletedCallback\n                this.onSaveFailed = saveFailedCallback\n                this.onEditModeChanged = editModeChangedCallback\n")
+          p.write_text(s)
+          PY
           test -f "$RUNNER_TEMP/pdfstudio-src/settings.gradle.kts"
           test -f "$RUNNER_TEMP/pdfstudio-src/app/build.gradle.kts"
 
@@ -65,7 +110,7 @@ jobs:
           set +e
           gradle --no-daemon --stacktrace :app:assembleDebug > "$RUNNER_TEMP/build.log" 2>&1
           status=$?
-          tail -n 300 "$RUNNER_TEMP/build.log"
+          tail -n 350 "$RUNNER_TEMP/build.log"
           exit $status
 
       - name: Upload build diagnostics
