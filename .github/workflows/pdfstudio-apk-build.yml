@@ -1,0 +1,72 @@
+name: Build PDF Studio Pro APK
+
+on:
+  push:
+    branches:
+      - pdfstudio-apk-build
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-37" "build-tools;36.0.0"
+
+      - name: Set up Gradle 9.5
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Restore PDF Studio Pro source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64, pathlib
+          data = '''UEsDBBQAAAAIABFlPVx/lw6hAAAA7gAAABAAAABQREYtU3R1ZGlvLVByby1NMTAuZ2l0aWdub3JlVY/NCsIwEITvPkV6b5oUevKKF7GC2kybD2ptu5FFvLttg4LW9DD7zW+GPeGIkaoI76ONVUiN8B2jBqYa58PryJmBe0wFmlQ4nL00KE1ci9VYcYwC0DHMtkogMs5xUCeorXMKN5LaDC4To8daZQ30Iw6GI3ev8lj2fKw+sGs1jpmo2ToDncgxix0S5pJR5I6d0nM17P7/RZT1Okt5QSwECFAMUAAAACAARZT1cf5cOoQAAAO4AAAAQAAAAAAAAAAAAAACAAQAAAABQREYtU3R1ZGlvLVByby1NMTAuZ2l0aWdub3JlUEsDBBQAAAAIABFlPVzYP51amwAAAJcBAAAWAAAAUERG...'''
+          pathlib.Path("$RUNNER_TEMP/pdfstudio.zip").write_bytes(base64.b64decode(data))
+          PY
+          mkdir -p "$RUNNER_TEMP/pdfstudio-src"
+          unzip -q "$RUNNER_TEMP/pdfstudio.zip" -d "$RUNNER_TEMP/pdfstudio-src"
+          test -f "$RUNNER_TEMP/pdfstudio-src/PDF-Studio-Pro-M10/settings.gradle.kts"
+
+      - name: Build installable debug APK
+        shell: bash
+        working-directory: ${{ runner.temp }}/pdfstudio-src/PDF-Studio-Pro-M10
+        run: |
+          gradle --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Prepare APK artifact
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/apk-out"
+          cp "$RUNNER_TEMP/pdfstudio-src/PDF-Studio-Pro-M10/app/build/outputs/apk/debug/app-debug.apk" \
+             "$RUNNER_TEMP/apk-out/PDF-Studio-Pro-1.0.0-rc1-Test.apk"
+          sha256sum "$RUNNER_TEMP/apk-out/PDF-Studio-Pro-1.0.0-rc1-Test.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDF-Studio-Pro-1.0.0-rc1-APK
+          path: ${{ runner.temp }}/apk-out/PDF-Studio-Pro-1.0.0-rc1-Test.apk
+          if-no-files-found: error
+          retention-days: 7
