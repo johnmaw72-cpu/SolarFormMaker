@@ -1,0 +1,74 @@
++                }
++                Switch(state.includeLoadNote, { checked -> vm.update { copy(includeLoadNote = checked) } })
++            }
++            if (state.includeLoadNote) {
++                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
++                    MiniField(state.dayFrom, { v -> vm.update { copy(dayFrom = v) } }, tr(lang, "Day from A", "نهار من", "ڕۆژ لە"), Modifier.weight(1f))
++                    MiniField(state.dayTo, { v -> vm.update { copy(dayTo = v) } }, tr(lang, "Day to A", "نهار إلى", "ڕۆژ بۆ"), Modifier.weight(1f))
++                }
++                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
++                    MiniField(state.nightAmps, { v -> vm.update { copy(nightAmps = v) } }, tr(lang, "Night A", "أمبير الليل", "ئەمپێری شەو"), Modifier.weight(1f))
++                    MiniField(state.nightHours, { v -> vm.update { copy(nightHours = v) } }, tr(lang, "Hours", "ساعات", "کاتژمێر"), Modifier.weight(1f))
++                }
++                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
++                    MiniField(state.emergencyAmps, { v -> vm.update { copy(emergencyAmps = v) } }, tr(lang, "Emergency A", "أمبير الضرورة", "ئەمپێری پێویست"), Modifier.weight(1f))
++                    MiniField(state.emergencyDuration, { v -> vm.update { copy(emergencyDuration = v) } }, tr(lang, "Duration", "المدة", "ماوە"), Modifier.weight(1f), KeyboardType.Text)
++                }
++            }
++            Field(state.customNote, { v -> vm.update { copy(customNote = v) } }, tr(lang, "Custom note (optional)", "ملاحظة مخصصة (اختياري)", "تێبینی تایبەت"), singleLine = false)
++            OutlinedButton(
++                onClick = { vm.update { copy(customNote = addStandardExclusionNotes(customNote)) } },
++                modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
++            ) {
++                Icon(Icons.Outlined.Add, null)
++                Spacer(Modifier.width(6.dp))
++                Text(tr(lang, "Add AC & civil-work exclusions", "إضافة ملاحظات AC والأعمال المدنية", "زیادکردنی تێبینی AC و کاری مەدەنی"))
++            }
++            Spacer(Modifier.height(14.dp))
++            PrimaryButton(tr(lang, "Done", "تم", "تەواو"), onDismiss, Modifier.fillMaxWidth())
++        }
++    }
++}
++
++@OptIn(ExperimentalMaterial3Api::class)
++@Composable
+ private fun CatalogSheet(
+     catalog: List<CatalogItemEntity>,
+     lang: String,
+--- a/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormViewModel.kt
++++ b/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormViewModel.kt
+@@ -61,7 +61,8 @@
+             }
+             if (aggregate != null) {
+                 workingIsDraft = aggregate.form.isDraft
+-                mutableState.value = aggregate.toUi(activeCurrency).copy(step = savedStateHandle[STEP_KEY] ?: 1)
++                val initialStep = savedStateHandle[STEP_KEY] ?: if (initialFormId != null && !aggregate.form.isDraft) 5 else 1
++                mutableState.value = aggregate.toUi(activeCurrency).copy(step = initialStep)
+             } else {
+                 val defaultOrganizer = database.organizerDao().getDefault()
+                 mutableState.value = mutableState.value.copy(
+@@ -91,21 +92,10 @@
+     fun saveForm() = viewModelScope.launch {
+         autoSaveJob?.cancel()
+         if (persistSafely(isDraft = false, successMessage = "Form saved")) {
++            // Keep the completed form open on the Review & Edit screen. A new blank form
++            // is created only when the user explicitly chooses New Form from navigation.
+             workingIsDraft = false
+-            if (initialFormId == null) {
+-                val currency = state.value.currency
+-                val defaultLoadNote = appPreferences.settings.first().showLoadNote
+-                val defaultOrganizer = database.organizerDao().getDefault()
+-                workingIsDraft = true
+-                mutableState.value = FormUiState(
+-                    currency = currency,
+-                    includeLoadNote = defaultLoadNote,
+-                    organizerId = defaultOrganizer?.id,
+-                    organizerName = defaultOrganizer?.name.orEmpty(),
+-                    message = "Form saved"
+-                )
+-                savedStateHandle[STEP_KEY] = 1
+-            }
++            savedStateHandle[STEP_KEY] = 5
+         }
+     }
+ 

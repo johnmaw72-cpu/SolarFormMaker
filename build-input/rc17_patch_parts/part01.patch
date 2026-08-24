@@ -1,0 +1,120 @@
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -32,8 +32,8 @@
+         applicationId = "com.infinitygreenpower.offerstudio"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 50
+-        versionName = "5.0.0-rc16"
++        versionCode = 51
++        versionName = "5.0.0-rc17"
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+         vectorDrawables.useSupportLibrary = true
+     }
+--- a/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
++++ b/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+@@ -70,6 +70,7 @@
+         factory = FormViewModel.factory(application, formId, resumeActiveDraft)
+     )
+     val state by vm.state.collectAsStateWithLifecycle()
++    val existingSavedForm = formId != null
+     val catalog by vm.catalog.collectAsStateWithLifecycle()
+     val organizers by vm.organizers.collectAsStateWithLifecycle()
+     var sheet by remember { mutableStateOf<String?>(null) }
+@@ -79,7 +80,7 @@
+     val lang = currentAppLanguage()
+     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { vm.importPhotos(it) }
+     LaunchedEffect(state.message) { state.message?.let { snackbarHostState.showSnackbar(it); vm.clearMessage() } }
+-    BackHandler(enabled = state.step > 1) { vm.goTo(state.step - 1) }
++    BackHandler(enabled = state.step in 2..4 || (state.step == 5 && !existingSavedForm)) { vm.goTo(state.step - 1) }
+ 
+     Scaffold(
+         containerColor = AppBackground,
+@@ -96,7 +97,11 @@
+     ) { padding ->
+         LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp, 48.dp, 18.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+             item {
+-                Text(if (state.step == 5) tr(lang,"Form Preview","معاينة الاستمارة","پێشبینینی فۆرم") else "${tr(lang,"New Form","استمارة جديدة","فۆرمی نوێ")} — ${tr(lang,"Step","الخطوة","هەنگاو")} ${state.step} / 4", fontSize = 27.sp, fontWeight = FontWeight.SemiBold, color = Navy)
++                Text(if (state.step == 5) tr(lang,"Review & Edit","مراجعة وتعديل","پێداچوونەوە و دەستکاری") else "${tr(lang,"New Form","استمارة جديدة","فۆرمی نوێ")} — ${tr(lang,"Step","الخطوة","هەنگاو")} ${state.step} / 4", fontSize = 27.sp, fontWeight = FontWeight.SemiBold, color = Navy)
++                if (state.step == 5) Text(
++                    tr(lang, "Edit any section here without going back through the form steps.", "عدّل أي قسم من هنا بدون الرجوع إلى خطوات الاستمارة.", "هەر بەشێک لێرە دەستکاری بکە بەبێ گەڕانەوە بۆ هەنگاوەکانی فۆرم."),
++                    color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)
++                )
+             }
+             if (state.step <= 4) item { StepProgress(state.step, lang) }
+             when (state.step) {
+@@ -104,7 +109,19 @@
+                 2 -> systemStep(state, vm, lang)
+                 3 -> itemsStep(state, vm, lang, { replacing = null; sheet = "catalog" }, { editing = DraftItem(); sheet = "item" }, { editing = it; sheet = "item" }, { replacing = it; sheet = "catalog" })
+                 4 -> finishStep(state, vm, lang, { sheet = "organizer" }, { photoPicker.launch("image/*") })
+-                5 -> previewStep(state, vm, lang)
++                5 -> previewStep(
++                    s = state,
++                    vm = vm,
++                    lang = lang,
++                    onEditClient = { sheet = "clientEdit" },
++                    onEditSystem = { sheet = "systemEdit" },
++                    onEditOrganizer = { sheet = "organizer" },
++                    onAddItem = { replacing = null; sheet = "catalog" },
++                    onEditItem = { editing = it; sheet = "item" },
++                    onReplaceItem = { replacing = it; sheet = "catalog" },
++                    onEditNotes = { sheet = "notesEdit" },
++                    onAddPhotos = { photoPicker.launch("image/*") }
++                )
+             }
+         }
+     }
+@@ -137,7 +154,20 @@
+         onDismiss = { sheet = null },
+         onSelect = { location -> vm.update { copy(location = location) }; sheet = null }
+     )
++    if (sheet == "locationFromReview") LocationSheet(
++        current = state.location,
++        lang = lang,
++        onDismiss = { sheet = "clientEdit" },
++        onSelect = { location -> vm.update { copy(location = location) }; sheet = "clientEdit" }
++    )
+     if (sheet == "item") ItemEditorSheet(editing ?: DraftItem(), lang, onDismiss = { sheet = null }) { item -> if (editing?.name.isNullOrBlank()) vm.addCustom(item.name, item.category, item.quantity, item.unitPrice, item.approximate) else vm.updateItem(item); sheet = null }
++    if (sheet == "clientEdit") ClientEditSheet(
++        state = state, vm = vm, lang = lang,
++        onDismiss = { sheet = null },
++        onChooseLocation = { sheet = "locationFromReview" }
++    )
++    if (sheet == "systemEdit") SystemEditSheet(state, vm, lang, onDismiss = { sheet = null })
++    if (sheet == "notesEdit") NotesEditSheet(state, vm, lang, onDismiss = { sheet = null })
+     if (sheet == "organizer") OrganizerSheet(
+         organizers = organizers,
+         lang = lang,
+@@ -227,14 +257,187 @@
+     item { FormCard { SectionTitle(tr(lang,"Site Photos","صور الموقع","وێنەکانی شوێن")); OutlinedButton(photos,Modifier.padding(vertical=8.dp)){Icon(Icons.Outlined.AddAPhoto,null);Text(tr(lang,"Add Photos","إضافة صور","زیادکردنی وێنە"))}; if(s.photos.isEmpty())Text(tr(lang,"No photos attached","لا توجد صور مرفقة","هیچ وێنەیەک نییە"),color=Muted) } }
+     items(s.photos,key={it.id}){p-> FormCard{ Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)){val bmp=remember(p.path){decodeThumbnail(p.path)}; if(bmp!=null)Image(bmp.asImageBitmap(),null,Modifier.size(72.dp));Column(Modifier.weight(1f)){Text(p.displayName);Row(verticalAlignment=Alignment.CenterVertically){Checkbox(p.included,{vm.togglePhoto(p.id)});Text(tr(lang,"Include in PDF","تضمين في PDF","لە PDF دابنێ"))}}}; Row{IconButton({vm.movePhoto(p.id,-1)}){Icon(Icons.Outlined.ArrowUpward,null)};IconButton({vm.movePhoto(p.id,1)}){Icon(Icons.Outlined.ArrowDownward,null)};IconButton({vm.removePhoto(p.id)}){Icon(Icons.Outlined.Delete,null,tint=Danger)}} } }
+ }
+-private fun androidx.compose.foundation.lazy.LazyListScope.previewStep(s: FormUiState, vm: FormViewModel, lang: String) {
+-    item { FormCard { SectionTitle(tr(lang,"Client","العميل","کڕیار")); Summary(tr(lang,"Name","الاسم","ناو"),s.clientName);Summary(tr(lang,"Phone","الهاتف","تەلەفۆن"),s.phone);if(s.location.isNotBlank())Summary(tr(lang,"Location","الموقع","شوێن"),s.location);Summary(tr(lang,"Date","التاريخ","بەروار"),s.date) } }
+-    item { FormCard { SectionTitle(tr(lang,"System & Inspection","المنظومة والكشف","سیستەم و پشکنین"));Summary(tr(lang,"System","المنظومة","سیستەم"),"${systemTypeLabel(s.systemType,lang)} • ${s.capacity} kW • ${phaseLabel(s.phase,lang)}");Summary(tr(lang,"Organizer","المنظم","ڕێکخەر"),s.organizerName) } }
+-    item { FormCard { SectionTitle(tr(lang,"Required Materials","المواد المطلوبة","ماددە پێویستەکان"));s.items.forEach{Summary(it.name,"${it.quantity} × ${it.unitPrice.ifBlank{"—"}}")};HorizontalDivider();Summary(tr(lang,"Estimated Total","المجموع التقديري","کۆی خەمڵاندراو"),"${s.estimatedTotal.stripTrailingZeros().toPlainString()} ${s.currency}") } }
+-    if (s.includeLoadNote || s.customNote.isNotBlank()) item { FormCard { SectionTitle(tr(lang,"Load / Notes","التحميل / الملاحظات","بار / تێبینی"));if(s.includeLoadNote)Text(generatedLoadNote(s,lang),fontSize=13.sp);if(s.customNote.isNotBlank())Text(s.customNote,Modifier.padding(top=if(s.includeLoadNote)10.dp else 0.dp)) } }
+-    item { FormCard { Summary(tr(lang,"Site photos","صور الموقع","وێنەکانی شوێن"),"${s.photos.count{it.included}} / ${s.photos.size}") } }
+-    item { ExportActions(s,lang) }
+-    item { PrimaryButton(tr(lang,"Save Form","حفظ الاستمارة","فۆرم پاشەکەوت بکە"),vm::saveForm,Modifier.fillMaxWidth()); OutlinedButton({vm.goTo(4)},Modifier.fillMaxWidth().padding(top=8.dp)){Text(tr(lang,"Back to Edit","العودة للتعديل","گەڕانەوە بۆ دەستکاری"))} }
++private fun androidx.compose.foundation.lazy.LazyListScope.previewStep(
++    s: FormUiState,
++    vm: FormViewModel,
++    lang: String,
++    onEditClient: () -> Unit,
++    onEditSystem: () -> Unit,
++    onEditOrganizer: () -> Unit,
++    onAddItem: () -> Unit,
++    onEditItem: (DraftItem) -> Unit,
++    onReplaceItem: (DraftItem) -> Unit,
++    onEditNotes: () -> Unit,
++    onAddPhotos: () -> Unit
++) {
++    item {
++        FormCard {
++            ReviewSectionHeader(tr(lang, "Client Details", "بيانات العميل", "زانیاری کڕیار"), onEditClient, lang)
++            EditableSummary(tr(lang, "Name", "الاسم", "ناو"), s.clientName, onEditClient, lang)
++            EditableSummary(tr(lang, "Phone", "الهاتف", "تەلەفۆن"), s.phone, onEditClient, lang)
++            EditableSummary(
++                tr(lang, "Location", "الموقع", "شوێن"),
++                s.location.ifBlank { tr(lang, "Not set", "غير محدد", "دیاری نەکراوە") },
