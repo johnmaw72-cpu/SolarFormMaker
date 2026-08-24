@@ -1,0 +1,5 @@
+--- a/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
++++ b/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+@@ -233 +233 @@
+-    item { FormCard { SectionTitle(tr(lang,"Required Materials","المواد المطلوبة","ماددە پێویستەکان"));s.items.forEach{Summary(it.name,"${it.quantity} × ${it.unitPrice.ifBlank{"—"}}") } ;HorizontalDivider();Summary(tr(lang,"Estimated Total","المجموع التقديري","کۆی خەمڵاندراو"),"${s.estimatedTotal.stripTrailingZeros().toPlainString()} ${s.currency}") } }
++    item { FormCard { SectionTitle(tr(lang,"Required Materials","المواد المطلوبة","ماددە پێویستەکان"));s.items.forEach{Summary(it.name,"${it.quantity} × ${it.unitPrice.ifBlank{"—"}}")};HorizontalDivider();Summary(tr(lang,"Estimated Total","المجموع التقديري","کۆی خەمڵاندراو"),"${s.estimatedTotal.stripTrailingZeros().toPlainString()} ${s.currency}") } }

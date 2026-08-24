@@ -1,0 +1,120 @@
++            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
++        )
++    }
++}
++
++@Composable
++private fun ReviewSectionHeader(title: String, onAction: () -> Unit, lang: String, add: Boolean = false) {
++    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
++        SectionTitle(title)
++        Spacer(Modifier.weight(1f))
++        FilledTonalIconButton(onClick = onAction, modifier = Modifier.size(38.dp)) {
++            Icon(
++                if (add) Icons.Outlined.Add else Icons.Outlined.Edit,
++                contentDescription = if (add) tr(lang, "Add", "إضافة", "زیادکردن") else tr(lang, "Edit", "تعديل", "دەستکاری"),
++                tint = InfinityTeal
++            )
++        }
++    }
++}
++
++@Composable
++private fun EditableSummary(label: String, value: String, onEdit: () -> Unit, lang: String) {
++    Row(
++        Modifier.fillMaxWidth().padding(vertical = 3.dp),
++        verticalAlignment = Alignment.CenterVertically,
++        horizontalArrangement = Arrangement.spacedBy(6.dp)
++    ) {
++        Text(label, color = Muted, modifier = Modifier.weight(0.9f), fontSize = 13.sp)
++        Text(
++            value,
++            color = Navy,
++            fontWeight = FontWeight.Medium,
++            textAlign = TextAlign.End,
++            modifier = Modifier.weight(1.1f),
++            maxLines = 2
++        )
++        IconButton(onClick = onEdit, modifier = Modifier.size(34.dp)) {
++            Icon(Icons.Outlined.Edit, tr(lang, "Edit $label", "تعديل $label", "دەستکاری $label"), tint = InfinityTeal, modifier = Modifier.size(18.dp))
++        }
++    }
+ }
+ 
+ @Composable
+@@ -789,6 +992,113 @@
+ 
+ @OptIn(ExperimentalMaterial3Api::class)
+ @Composable
++private fun ClientEditSheet(
++    state: FormUiState,
++    vm: FormViewModel,
++    lang: String,
++    onDismiss: () -> Unit,
++    onChooseLocation: () -> Unit
++) {
++    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
++    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
++        Column(
++            Modifier.fillMaxHeight(.88f).verticalScroll(rememberScrollState()).padding(18.dp).navigationBarsPadding()
++        ) {
++            Text(tr(lang, "Edit Client Details", "تعديل بيانات العميل", "دەستکاری زانیاری کڕیار"), fontSize = 21.sp, fontWeight = FontWeight.Bold)
++            Text(
++                tr(lang, "Changes are applied to this form directly.", "تُطبق التعديلات على هذه الاستمارة مباشرة.", "گۆڕانکارییەکان ڕاستەوخۆ لەم فۆرمە جێبەجێ دەکرێن."),
++                color = Muted, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp)
++            )
++            Field(state.clientName, { value -> vm.update { copy(clientName = value) } }, tr(lang, "Client name", "اسم العميل", "ناوی کڕیار"), "client" in state.errors)
++            Field(state.phone, { value -> vm.update { copy(phone = value) } }, tr(lang, "Phone", "الهاتف", "تەلەفۆن"), "phone" in state.errors, KeyboardType.Phone)
++            SelectorField(
++                value = state.location,
++                label = tr(lang, "Location (optional)", "الموقع (اختياري)", "شوێن (ئارەزوومەندانە)"),
++                placeholder = tr(lang, "Choose an Iraqi city or custom location", "اختر مدينة عراقية أو موقعاً مخصصاً", "شارێکی عێراق یان شوێنێکی تایبەت هەڵبژێرە"),
++                onClick = onChooseLocation
++            )
++            Field(state.date, { value -> vm.update { copy(date = value) } }, tr(lang, "Date (YYYY-MM-DD)", "التاريخ", "بەروار"), "date" in state.errors)
++            Spacer(Modifier.height(12.dp))
++            PrimaryButton(tr(lang, "Done", "تم", "تەواو"), onDismiss, Modifier.fillMaxWidth())
++        }
++    }
++}
++
++@OptIn(ExperimentalMaterial3Api::class)
++@Composable
++private fun SystemEditSheet(state: FormUiState, vm: FormViewModel, lang: String, onDismiss: () -> Unit) {
++    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
++    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
++        Column(
++            Modifier.fillMaxHeight(.88f).verticalScroll(rememberScrollState()).padding(18.dp).navigationBarsPadding()
++        ) {
++            Text(tr(lang, "Edit System Details", "تعديل تفاصيل المنظومة", "دەستکاری وردەکاری سیستەم"), fontSize = 21.sp, fontWeight = FontWeight.Bold)
++            Text(tr(lang, "System type", "نوع المنظومة", "جۆری سیستەم"), color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp, bottom = 6.dp))
++            Segment(listOf("Hybrid", "On-Grid", "Off-Grid"), state.systemType, { systemTypeLabel(it, lang) }) { value -> vm.update { copy(systemType = value) } }
++            Text(tr(lang, "Quick capacity", "السعة السريعة", "توانای خێرا"), Modifier.padding(top = 16.dp, bottom = 8.dp), fontWeight = FontWeight.Medium)
++            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
++                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
++                    listOf("5", "8", "10", "12", "16", "20", "30").forEach { capacity ->
++                        AssistChip(onClick = { vm.update { copy(capacity = capacity) } }, label = { Text("$capacity kW") })
++                    }
++                }
++            }
++            Field(state.capacity, { value -> vm.update { copy(capacity = value) } }, tr(lang, "Required capacity (kW)", "السعة المطلوبة", "توانای پێویست"), "capacity" in state.errors, KeyboardType.Decimal)
++            Text(tr(lang, "Phase", "الطور", "فاز"), color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp, bottom = 6.dp))
++            Segment(listOf("Single Phase", "Three Phase"), state.phase, { phaseLabel(it, lang) }) { value -> vm.update { copy(phase = value) } }
++            Spacer(Modifier.height(16.dp))
++            PrimaryButton(tr(lang, "Done", "تم", "تەواو"), onDismiss, Modifier.fillMaxWidth())
++        }
++    }
++}
++
++@OptIn(ExperimentalMaterial3Api::class)
++@Composable
++private fun NotesEditSheet(state: FormUiState, vm: FormViewModel, lang: String, onDismiss: () -> Unit) {
++    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
++    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
++        Column(
++            Modifier.fillMaxHeight(.9f).verticalScroll(rememberScrollState()).padding(18.dp).navigationBarsPadding()
++        ) {
++            Text(tr(lang, "Edit Load & Notes", "تعديل التحميل والملاحظات", "دەستکاری بار و تێبینی"), fontSize = 21.sp, fontWeight = FontWeight.Bold)
++            Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
++                Column(Modifier.weight(1f)) {
++                    Text(tr(lang, "Load Capacity Note", "ملاحظة التحميل", "تێبینی بار"), fontWeight = FontWeight.SemiBold)
++                    Text(tr(lang, "Optional for this form", "اختيارية لهذه الاستمارة", "بۆ ئەم فۆرمە ئارەزوومەندانەیە"), color = Muted, fontSize = 11.sp)
