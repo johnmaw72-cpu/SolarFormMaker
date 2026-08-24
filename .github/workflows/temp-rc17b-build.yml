@@ -1,0 +1,111 @@
+name: Temporary RC17B Review Edit Build
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-rc17b:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct exact RC16 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          lines = Path('.github/workflows/temp-rc16-build.yml').read_text().splitlines()
+          for name in ['Reconstruct exact RC14 source','Apply verified RC15 patch','Apply RC16 keyboard and preview fixes']:
+              start = next(i for i,l in enumerate(lines) if l.strip() == f'- name: {name}')
+              run = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == 'run: |')
+              body=[]
+              for line in lines[run+1:]:
+                  if line.startswith('      - name:') or line.startswith('      - uses:'):
+                      break
+                  body.append(line[10:] if line.startswith('          ') else line)
+              p=Path('/tmp')/(name.replace(' ','_')+'.sh')
+              p.write_text('\n'.join(body).rstrip()+'\n')
+              subprocess.run(['bash',str(p)],check=True)
+          PY
+
+      - name: Apply RC17 edits
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/igp-build/IGP
+          cat build-input/rc17_patch_parts/part01.patch build-input/rc17_patch_parts/part02.patch build-input/rc17_patch_parts/part03.patch build-input/rc17_patch_parts/part04a.patch > /tmp/rc17.patch
+          cd "$ROOT"
+          patch -l -p1 < /tmp/rc17.patch
+          python - <<'PY'
+          from pathlib import Path
+          root=Path('/tmp/igp-build/IGP')
+          p=root/'app/src/main/java/com/infinitygreenpower/organizerform/feature/saved/SavedFormsScreen.kt'
+          s=p.read_text()
+          s=s.replace('localText("Edit","تعديل","دەستکاری")','localText("Review & Edit","مراجعة وتعديل","پێداچوونەوە و دەستکاری")',1)
+          p.write_text(s)
+          mirror=root/'app/src/java/com/infinitygreenpower/organizerform'
+          for rel in ['feature/form/FormScreen.kt','feature/form/FormViewModel.kt','feature/saved/SavedFormsScreen.kt']:
+              src=root/'app/src/main/java/com/infinitygreenpower/organizerform'/rel
+              dst=mirror/rel
+              if dst.parent.exists(): dst.write_text(src.read_text())
+          (root/'RC17_UPDATES.md').write_text('# IGP Organizer Form 5.0.0-rc17\n\nDirect Review & Edit for completed forms; in-place client, system, organizer, materials, notes and photo editing; PDF actions stay on the same screen; saving keeps the same form open.\n')
+          PY
+          grep -Fq 'versionCode = 51' "$ROOT/app/build.gradle.kts"
+          grep -Fq 'versionName = "5.0.0-rc17"' "$ROOT/app/build.gradle.kts"
+          grep -Fq 'Review & Edit' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 36
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Prepare RC16-compatible signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d build-input/v5_language_fix/preview-test-keystore.b64 > /tmp/igp-preview-test.jks
+          RC16=.github/workflows/temp-rc16-build.yml
+          echo "IGP_PREVIEW_KEYSTORE=/tmp/igp-preview-test.jks" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_STORE_PASSWORD=$(awk -F': ' '/IGP_PREVIEW_STORE_PASSWORD:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_ALIAS=$(awk -F': ' '/IGP_PREVIEW_KEY_ALIAS:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_PASSWORD=$(awk -F': ' '/IGP_PREVIEW_KEY_PASSWORD:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+
+      - name: Build RC17 APK
+        working-directory: /tmp/igp-build/IGP
+        run: gradle --no-daemon clean assembleDebug
+
+      - name: Stage APK and source
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=/tmp/igp-build/IGP/app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee /tmp/badging.txt
+          grep -Fq "package: name='com.infinitygreenpower.offerstudio.preview' versionCode='51' versionName='5.0.0-rc17-test'" /tmp/badging.txt
+          cp "$APK" "$GITHUB_WORKSPACE/IGP-Organizer-Form-5.0.0-rc17-Review-Edit.apk"
+          cd /tmp/igp-build
+          find IGP -type d \( -name build -o -name .gradle \) -prune -exec rm -rf {} + || true
+          zip -qr "$GITHUB_WORKSPACE/IGP-Organizer-Form-5.0.0-rc17-source.zip" IGP
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IGP-Organizer-Form-5.0.0-rc17-APK-and-Source
+          path: |
+            IGP-Organizer-Form-5.0.0-rc17-Review-Edit.apk
+            IGP-Organizer-Form-5.0.0-rc17-source.zip
+          if-no-files-found: error
+          retention-days: 7
