@@ -1,0 +1,116 @@
+name: Temporary RC19 Notes Language Build
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-rc19:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct exact RC18 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          lines = Path('.github/workflows/temp-rc18-build.yml').read_text().splitlines()
+          for name in ['Reconstruct exact RC16 source','Reconstruct exact RC17 source','Apply RC18 direct PDF editing patch']:
+              start = next(i for i,l in enumerate(lines) if l.strip() == f'- name: {name}')
+              run = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == 'run: |')
+              body=[]
+              for line in lines[run+1:]:
+                  if line.startswith('      - name:') or line.startswith('      - uses:'):
+                      break
+                  body.append(line[10:] if line.startswith('          ') else line)
+              p=Path('/tmp')/(name.replace(' ','_')+'.sh')
+              p.write_text('\n'.join(body).rstrip()+'\n')
+              subprocess.run(['bash',str(p)],check=True)
+          PY
+          grep -Fq 'versionCode = 52' /tmp/igp-build/IGP/app/build.gradle.kts
+          grep -Fq 'versionName = "5.0.0-rc18"' /tmp/igp-build/IGP/app/build.gradle.kts
+
+      - name: Apply RC19 per-form notes language
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/igp-build/IGP
+          cat build-input/rc19_note_language/part*.txt > /tmp/rc19.patch.gz.b64
+          base64 -d /tmp/rc19.patch.gz.b64 > /tmp/rc19.patch.gz
+          echo 'e4a0bd76bb801e5ff6c0dff2a833945b9ae1ca63e7ba2dd2f057f936fc3bc795  /tmp/rc19.patch.gz' | sha256sum -c -
+          gzip -dc /tmp/rc19.patch.gz > /tmp/rc19.patch
+          echo 'a0a2f0c94afb8472ca2baf8a0e9cc63ea82aee89da9d9d4420e199b634737e6c  /tmp/rc19.patch' | sha256sum -c -
+          cd "$ROOT"
+          patch -p2 < /tmp/rc19.patch
+          grep -Fq 'versionCode = 53' app/build.gradle.kts
+          grep -Fq 'versionName = "5.0.0-rc19"' app/build.gradle.kts
+          grep -Fq 'val noteLanguage: String = "ar"' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormModels.kt
+          grep -Fq 'NotesLanguageSelector' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+          grep -Fq 'generatedLoadNote(s,s.noteLanguage)' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+          grep -Fq 'generatedLoadNote(s, noteLang)' app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt
+          grep -Fq 'MIGRATION_2_3' app/src/main/java/com/infinitygreenpower/organizerform/data/db/OrganizerDatabase.kt
+          ! grep -Fq 'this.noteLanguage = noteLanguage' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Prepare RC18-compatible preview signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d build-input/v5_language_fix/preview-test-keystore.b64 > /tmp/igp-preview-test.jks
+          RC16=.github/workflows/temp-rc16-build.yml
+          echo "IGP_PREVIEW_KEYSTORE=/tmp/igp-preview-test.jks" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_STORE_PASSWORD=$(awk -F': ' '/IGP_PREVIEW_STORE_PASSWORD:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_ALIAS=$(awk -F': ' '/IGP_PREVIEW_KEY_ALIAS:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_PASSWORD=$(awk -F': ' '/IGP_PREVIEW_KEY_PASSWORD:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+
+      - name: Build RC19 APK
+        working-directory: /tmp/igp-build/IGP
+        run: gradle --no-daemon clean assembleDebug
+
+      - name: Verify and stage RC19 APK and source
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=/tmp/igp-build/IGP/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee /tmp/badging.txt
+          grep -Fq "package: name='com.infinitygreenpower.offerstudio.preview' versionCode='53' versionName='5.0.0-rc19-test'" /tmp/badging.txt
+          test -s /tmp/igp-build/IGP/app/schemas/com.infinitygreenpower.organizerform.data.db.OrganizerDatabase/3.json
+          cp "$APK" "$GITHUB_WORKSPACE/IGP-Organizer-Form-5.0.0-rc19-Notes-Language.apk"
+          cd /tmp/igp-build
+          find IGP -type d \( -name build -o -name .gradle \) -prune -exec rm -rf {} + || true
+          zip -qr "$GITHUB_WORKSPACE/IGP-Organizer-Form-5.0.0-rc19-source.zip" IGP
+          cd "$GITHUB_WORKSPACE"
+          sha256sum IGP-Organizer-Form-5.0.0-rc19-Notes-Language.apk IGP-Organizer-Form-5.0.0-rc19-source.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IGP-Organizer-Form-5.0.0-rc19-APK-and-Source
+          path: |
+            IGP-Organizer-Form-5.0.0-rc19-Notes-Language.apk
+            IGP-Organizer-Form-5.0.0-rc19-source.zip
+          if-no-files-found: error
+          retention-days: 7
