@@ -1,0 +1,67 @@
+--- maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/viewmodel/AppViewModels.kt	2026-08-25 15:03:26.000000000 +0000
++++ maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/viewmodel/AppViewModels.kt	2026-08-25 19:10:33.317638335 +0000
+@@ -20,6 +20,7 @@
+ import com.infinitygreen.maintenance.rebuild.data.preferences.AppPreferences
+ import com.infinitygreen.maintenance.rebuild.data.preferences.PreferenceRepository
+ import com.infinitygreen.maintenance.rebuild.domain.Currency
++import com.infinitygreen.maintenance.rebuild.domain.DraftPart
+ import com.infinitygreen.maintenance.rebuild.domain.ReportDraft
+ import com.infinitygreen.maintenance.rebuild.ui.theme.ThemeMode
+ import dagger.hilt.android.lifecycle.HiltViewModel
+--- maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/data/files/PdfExporter.kt	2026-08-25 15:02:59.000000000 +0000
++++ maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/data/files/PdfExporter.kt	2026-08-25 20:03:34.680168394 +0000
+@@ -522,19 +522,34 @@
+             appLogo: Bitmap?
+         ) {
+             val top = y
+-            val headerHeight = if (companyLogo != null || appLogo != null) 72f else 55f
++            // Keep a stable header footprint regardless of logo visibility. Previously the
++            // no-logo layout shrank to 55 pt even though a two-line title, subtitle and
++            // company name require more room, causing the header to overlap the meta table.
++            val hasAnyLogo = companyLogo != null || appLogo != null
++            val headerHeight = 76f
++
+             companyLogo?.let { drawBitmapFit(it, RectF(margin, top, margin + 116f, top + 54f)) }
+             appLogo?.let { drawBitmapFit(it, RectF(width - margin - 54f, top, width - margin, top + 54f)) }
++
+             val titleLines = title.split('\n')
+-            val startBaseline = top + if (titleLines.size > 1) 20f else 28f
++            val titleLineSpacing = 18f
++            val startBaseline = top + if (titleLines.size > 1) 20f else 27f
+             titleLines.forEachIndexed { index, line ->
+-                canvas.drawText(line, width / 2f, startBaseline + index * 18f, titlePaint)
++                canvas.drawText(line, width / 2f, startBaseline + index * titleLineSpacing, titlePaint)
+             }
+-            canvas.drawText(subtitle, width / 2f, startBaseline + titleLines.size * 18f + 1f, subtitlePaint)
+-            if (companyLogo == null && appLogo == null) {
+-                val companyPaint = Paint(label).apply { color = green; textAlign = Paint.Align.CENTER }
+-                canvas.drawText(companyName, width / 2f, top + headerHeight - 5f, companyPaint)
++
++            val subtitleBaseline = startBaseline + titleLines.size * titleLineSpacing + 1f
++            canvas.drawText(subtitle, width / 2f, subtitleBaseline, subtitlePaint)
++
++            if (!hasAnyLogo) {
++                val companyPaint = Paint(label).apply {
++                    color = green
++                    textAlign = Paint.Align.CENTER
++                }
++                val companyBaseline = maxOf(subtitleBaseline + 12f, top + headerHeight - 6f)
++                canvas.drawText(companyName, width / 2f, companyBaseline.coerceAtMost(top + headerHeight - 5f), companyPaint)
+             }
++
+             y = top + headerHeight
+         }
+ 
+--- maintenance-v140/app/build.gradle.kts	2026-08-25 15:00:18.000000000 +0000
++++ maintenance-v140/app/build.gradle.kts	2026-08-25 20:03:34.680301948 +0000
+@@ -13,8 +13,8 @@
+         applicationId = "com.infinitygreen.maintenance.rebuild"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 10400
+-        versionName = "1.4.0"
++        versionCode = 10401
++        versionName = "1.4.1"
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+         vectorDrawables.useSupportLibrary = true
+     }
