@@ -133,19 +133,19 @@ jobs:
                   path.write_text(text.replace('</resources>', '\n' + '\n'.join(new_lines) + '\n</resources>'))
           PY
 
-          # Force the exact reviewed v1.4.4 Spare Parts screen instead of relying on
-          # overlapping v1.4.2/v1.4.3 patch contexts.
+          # Force the exact reviewed v1.4.4 Spare Parts screen and matching navigation.
           base64 -d ci/v144-CatalogScreens.kt.gz.b64 | gzip -d > \
             maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/CatalogScreens.kt
+          base64 -d ci/v144-IgpApp.kt.gz.b64 | gzip -d > \
+            maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/IgpApp.kt
 
-          # GNU patch may leave backup/reject files. Android treats files inside res/
-          # as resources, so remove all patch artifacts before compilation.
           find maintenance-v140 -type f \( -name '*.orig' -o -name '*.rej' \) -delete
 
       - name: Verify v1.4.4 requested features
         run: |
           set -euo pipefail
           CATALOG=maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/CatalogScreens.kt
+          APP=maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/IgpApp.kt
           grep -q 'versionCode = 10404' maintenance-v140/app/build.gradle.kts
           grep -q 'versionName = "1.4.4"' maintenance-v140/app/build.gradle.kts
           grep -q 'fun SerialScannerDialog' maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/ScannerScreen.kt
@@ -155,6 +155,7 @@ jobs:
           grep -q 'stringSetPreferencesKey("spare_part_categories")' maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/data/preferences/PreferenceRepository.kt
           grep -q 'val userCategories = preferences.preferences' maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/viewmodel/AppViewModels.kt
           grep -q 'name="add_category"' maintenance-v140/app/src/main/res/values/strings.xml
+          grep -q 'composable(Routes.SPARES) { SparePartsScreen() }' "$APP"
           ! grep -q 'PCB / Board' "$CATALOG"
           ! grep -q 'sparePartCategoryPresets' "$CATALOG"
           test -z "$(find maintenance-v140 -type f \( -name '*.orig' -o -name '*.rej' \) -print -quit)"
