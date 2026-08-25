@@ -1,15 +1,3 @@
-diff -ruN maintenance-v140/CHANGES_1.4.2.md maintenance-v140/CHANGES_1.4.2.md
---- maintenance-v140/CHANGES_1.4.2.md	2026-08-25 20:19:11.000000000 +0000
-+++ maintenance-v140/CHANGES_1.4.2.md	2026-08-25 20:33:24.031958843 +0000
-@@ -8,3 +8,8 @@
- - Current stock can be left blank when creating/editing a part.
- - Low-stock warning no longer appears merely because both current stock and minimum stock are zero.
- - Version updated to 1.4.2 (10402).
-+
-+## UI transition cleanup
-+- Removed NavHost cross-fade overlap that briefly rendered the previous and next screens together.
-+- Report edit option sheets now use an explicit opaque surface and stronger scrim so the old form does not visually bleed through while the sheet opens.
-+- This targets the ghosting/flicker visible when opening Spare Parts and report option windows, especially in dark mode on Xiaomi/HyperOS devices.
 diff -ruN maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/IgpApp.kt maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/IgpApp.kt
 --- maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/IgpApp.kt	2026-08-25 15:04:23.000000000 +0000
 +++ maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/IgpApp.kt	2026-08-25 20:21:29.610916711 +0000
