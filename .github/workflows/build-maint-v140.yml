@@ -1,4 +1,4 @@
-name: Build IGP Maintenance v1.4.1 APK
+name: Build IGP Maintenance v1.4.2 APK
 
 on:
   push:
@@ -35,6 +35,10 @@ jobs:
       - name: Apply v1.4.1 patch
         run: patch -p0 < ci/v141.patch
 
+      - name: Apply v1.4.2 spare-parts patch
+        run: |
+          echo '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' | base64 -d | gzip -d | patch -p0
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -67,15 +71,15 @@ jobs:
       - name: Verify APK
         run: |
           test -f maintenance-v140/app/build/outputs/apk/debug/app-debug.apk
-          cp maintenance-v140/app/build/outputs/apk/debug/app-debug.apk IGP-Technical-Maintenance-Reports-v1.4.1-Debug.apk
-          sha256sum IGP-Technical-Maintenance-Reports-v1.4.1-Debug.apk > IGP-Technical-Maintenance-Reports-v1.4.1-Debug.apk.sha256
+          cp maintenance-v140/app/build/outputs/apk/debug/app-debug.apk IGP-Technical-Maintenance-Reports-v1.4.2-Debug.apk
+          sha256sum IGP-Technical-Maintenance-Reports-v1.4.2-Debug.apk > IGP-Technical-Maintenance-Reports-v1.4.2-Debug.apk.sha256
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: IGP-Technical-Maintenance-Reports-v1.4.1-APK
+          name: IGP-Technical-Maintenance-Reports-v1.4.2-APK
           path: |
-            IGP-Technical-Maintenance-Reports-v1.4.1-Debug.apk
-            IGP-Technical-Maintenance-Reports-v1.4.1-Debug.apk.sha256
+            IGP-Technical-Maintenance-Reports-v1.4.2-Debug.apk
+            IGP-Technical-Maintenance-Reports-v1.4.2-Debug.apk.sha256
           if-no-files-found: error
           retention-days: 30
