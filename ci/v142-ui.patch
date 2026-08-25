@@ -1,0 +1,131 @@
+diff -ruN maintenance-v140/CHANGES_1.4.2.md maintenance-v140/CHANGES_1.4.2.md
+--- maintenance-v140/CHANGES_1.4.2.md	2026-08-25 20:19:11.000000000 +0000
++++ maintenance-v140/CHANGES_1.4.2.md	2026-08-25 20:33:24.031958843 +0000
+@@ -8,3 +8,8 @@
+ - Current stock can be left blank when creating/editing a part.
+ - Low-stock warning no longer appears merely because both current stock and minimum stock are zero.
+ - Version updated to 1.4.2 (10402).
++
++## UI transition cleanup
++- Removed NavHost cross-fade overlap that briefly rendered the previous and next screens together.
++- Report edit option sheets now use an explicit opaque surface and stronger scrim so the old form does not visually bleed through while the sheet opens.
++- This targets the ghosting/flicker visible when opening Spare Parts and report option windows, especially in dark mode on Xiaomi/HyperOS devices.
+diff -ruN maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/IgpApp.kt maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/IgpApp.kt
+--- maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/IgpApp.kt	2026-08-25 15:04:23.000000000 +0000
++++ maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/IgpApp.kt	2026-08-25 20:21:29.610916711 +0000
+@@ -1,5 +1,7 @@
+ package com.infinitygreen.maintenance.rebuild.ui
+ 
++import androidx.compose.animation.EnterTransition
++import androidx.compose.animation.ExitTransition
+ import androidx.compose.foundation.Image
+ import androidx.compose.foundation.layout.*
+ import androidx.compose.material.icons.Icons
+@@ -217,7 +219,15 @@
+                 }
+             }
+         ) { padding ->
+-            NavHost(navController, Routes.DASHBOARD, Modifier.padding(padding)) {
++            NavHost(
++                navController = navController,
++                startDestination = Routes.DASHBOARD,
++                modifier = Modifier.padding(padding),
++                enterTransition = { EnterTransition.None },
++                exitTransition = { ExitTransition.None },
++                popEnterTransition = { EnterTransition.None },
++                popExitTransition = { ExitTransition.None }
++            ) {
+                 composable(Routes.DASHBOARD) { entry ->
+                     val scanned = entry.savedStateHandle.getStateFlow("scannedSerial", "").collectAsStateWithLifecycle()
+                     LaunchedEffect(scanned.value) {
+diff -ruN maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/ReportFormScreen.kt maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/ReportFormScreen.kt
+--- maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/ReportFormScreen.kt	2026-08-25 15:02:28.000000000 +0000
++++ maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/ReportFormScreen.kt	2026-08-25 20:44:34.539933616 +0000
+@@ -1,6 +1,7 @@
+ package com.infinitygreen.maintenance.rebuild.ui.screens
+ 
+ import android.net.Uri
++import android.view.WindowManager
+ import androidx.activity.compose.BackHandler
+ import androidx.activity.compose.rememberLauncherForActivityResult
+ import androidx.activity.result.PickVisualMediaRequest
+@@ -27,6 +28,7 @@
+ import androidx.compose.ui.graphics.Color
+ import androidx.compose.ui.layout.ContentScale
+ import androidx.compose.ui.platform.LocalConfiguration
++import androidx.compose.ui.platform.LocalView
+ import androidx.compose.ui.res.painterResource
+ import androidx.compose.ui.res.stringResource
+ import androidx.compose.ui.text.font.FontWeight
+@@ -35,6 +37,8 @@
+ import androidx.compose.ui.text.style.TextOverflow
+ import androidx.compose.ui.unit.dp
+ import androidx.compose.ui.window.Dialog
++import androidx.compose.ui.window.DialogProperties
++import androidx.compose.ui.window.DialogWindowProvider
+ import androidx.hilt.navigation.compose.hiltViewModel
+ import androidx.lifecycle.compose.collectAsStateWithLifecycle
+ import coil.compose.AsyncImage
+@@ -702,7 +706,6 @@
+     onOpenPhoto: (String) -> Unit,
+     updateDirect: ((ReportDraft) -> ReportDraft) -> Unit
+ ) {
+-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+     var workingDraft by remember(section) { mutableStateOf(draft) }
+     val updateWorking: ((ReportDraft) -> ReportDraft) -> Unit = { transform -> workingDraft = transform(workingDraft) }
+     val directEditor = section == ReportEditorSection.PARTS || section == ReportEditorSection.PHOTOS
+@@ -715,12 +718,41 @@
+         }
+     }
+ 
+-    ModalBottomSheet(
++    // Use a fixed dialog-backed editor instead of Material3 ModalBottomSheet.
++    // ModalBottomSheet animates through multiple measured/settled positions while it opens,
++    // which caused the visible "dancing"/jumping effect on some Android devices. This editor
++    // has one fixed bottom position and disables the platform dialog window animation.
++    Dialog(
+         onDismissRequest = onDismiss,
+-        sheetState = sheetState,
+-        dragHandle = null
++        properties = DialogProperties(
++            usePlatformDefaultWidth = false,
++            decorFitsSystemWindows = true,
++            dismissOnBackPress = true,
++            dismissOnClickOutside = false
++        )
+     ) {
+-        Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f)) {
++        val dialogView = LocalView.current
++        SideEffect {
++            (dialogView.parent as? DialogWindowProvider)?.window?.apply {
++                setWindowAnimations(0)
++                setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
++            }
++        }
++        Box(
++            Modifier
++                .fillMaxSize()
++                .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.72f)),
++            contentAlignment = Alignment.BottomCenter
++        ) {
++            Surface(
++                modifier = Modifier
++                    .fillMaxWidth()
++                    .fillMaxHeight(0.92f),
++                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
++                color = MaterialTheme.colorScheme.surface,
++                tonalElevation = 6.dp
++            ) {
++                Column(Modifier.fillMaxSize()) {
+             Row(
+                 Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 14.dp, bottom = 10.dp),
+                 verticalAlignment = Alignment.CenterVertically
+@@ -849,6 +881,8 @@
+         }
+     }
+ }
++}
++}
+ 
+ @Composable
+ private fun editorTitle(section: ReportEditorSection): String = stringResource(
