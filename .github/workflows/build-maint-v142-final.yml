@@ -42,12 +42,16 @@ jobs:
           git show 60a69d6fa04a0f1d06eda20fc5ff1415b24cb62c:.github/workflows/build-maint-v140.yml > /tmp/old-v142.yml
           python3 - <<'PY'
           from pathlib import Path
-          import re, base64, gzip
+          import base64, gzip
           text = Path('/tmp/old-v142.yml').read_text()
-          match = re.search(r"echo '([A-Za-z0-9+/=]+)' \\| base64 -d \\| gzip -d \\| patch -p0", text)
-          if not match:
+          line = next(
+              (line for line in text.splitlines() if "echo 'H4s" in line and "| base64 -d | gzip -d | patch -p0" in line),
+              None,
+          )
+          if line is None:
               raise SystemExit('Could not recover proven v1.4.2 patch payload')
-          raw = gzip.decompress(base64.b64decode(match.group(1)))
+          payload = line.split("echo '", 1)[1].split("' | base64", 1)[0]
+          raw = gzip.decompress(base64.b64decode(payload))
           Path('/tmp/v142-spare.patch').write_bytes(raw)
           print('Recovered patch bytes:', len(raw))
           PY
