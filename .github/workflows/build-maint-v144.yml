@@ -55,16 +55,17 @@ jobs:
       - name: Apply v1.4.2 stable-window and ghosting fix
         run: patch -p0 < ci/v142-ui.patch
 
-      - name: Apply v1.4.3 spare-parts UI patch
+      - name: Apply v1.4.3 source changes
         run: |
           base64 -d ci/v143.patch.gz.b64 | gzip -d > /tmp/v143.patch
           patch -p1 < /tmp/v143.patch
 
-      - name: Apply and normalize v1.4.4 changes
+      - name: Apply v1.4.4 scanner categories and exact Spare Parts UI
         run: |
           set -euo pipefail
           base64 -d ci/v144.patch.gz.b64 | gzip -d > /tmp/v144.patch
           patch --batch --forward -p0 < /tmp/v144.patch || true
+
           python3 - <<'PY'
           from pathlib import Path
           import re
@@ -131,18 +132,33 @@ jobs:
               if new_lines:
                   path.write_text(text.replace('</resources>', '\n' + '\n'.join(new_lines) + '\n</resources>'))
           PY
-          find maintenance-v140 -name '*.rej' -delete
 
-      - name: Check v1.4.4 essentials
+          # Force the exact reviewed v1.4.4 Spare Parts screen instead of relying on
+          # overlapping v1.4.2/v1.4.3 patch contexts.
+          base64 -d ci/v144-CatalogScreens.kt.gz.b64 | gzip -d > \
+            maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/CatalogScreens.kt
+
+          # GNU patch may leave backup/reject files. Android treats files inside res/
+          # as resources, so remove all patch artifacts before compilation.
+          find maintenance-v140 -type f \( -name '*.orig' -o -name '*.rej' \) -delete
+
+      - name: Verify v1.4.4 requested features
         run: |
           set -euo pipefail
+          CATALOG=maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/CatalogScreens.kt
           grep -q 'versionCode = 10404' maintenance-v140/app/build.gradle.kts
           grep -q 'versionName = "1.4.4"' maintenance-v140/app/build.gradle.kts
           grep -q 'fun SerialScannerDialog' maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/ScannerScreen.kt
+          grep -q 'SerialScannerDialog' "$CATALOG"
+          grep -q 'AddSparePartCategoryDialog' "$CATALOG"
+          grep -q 'userCategories' "$CATALOG"
           grep -q 'stringSetPreferencesKey("spare_part_categories")' maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/data/preferences/PreferenceRepository.kt
           grep -q 'val userCategories = preferences.preferences' maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/viewmodel/AppViewModels.kt
-          echo 'Catalog feature markers:'
-          grep -nE 'SerialScannerDialog|AddSparePartCategoryDialog|PCB / Board|sparePartCategoryPresets' maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/CatalogScreens.kt || true
+          grep -q 'name="add_category"' maintenance-v140/app/src/main/res/values/strings.xml
+          ! grep -q 'PCB / Board' "$CATALOG"
+          ! grep -q 'sparePartCategoryPresets' "$CATALOG"
+          test -z "$(find maintenance-v140 -type f \( -name '*.orig' -o -name '*.rej' \) -print -quit)"
+          echo 'v1.4.4 feature verification passed.'
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
