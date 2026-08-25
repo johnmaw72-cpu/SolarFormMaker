@@ -1,0 +1,257 @@
+--- maintenance-v140/app/build.gradle.kts	2026-08-25 20:13:02.525360680 +0000
++++ maintenance-v140/app/build.gradle.kts	2026-08-25 20:11:52.108121628 +0000
+@@ -13,8 +13,8 @@
+         applicationId = "com.infinitygreen.maintenance.rebuild"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 10401
+-        versionName = "1.4.1"
++        versionCode = 10402
++        versionName = "1.4.2"
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+         vectorDrawables.useSupportLibrary = true
+     }
+--- maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/data/local/Daos.kt	2026-07-20 09:07:50.000000000 +0000
++++ maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/data/local/Daos.kt	2026-08-25 20:11:50.874979612 +0000
+@@ -153,7 +153,7 @@
+ interface SparePartDao {
+     @Query(
+         """SELECT * FROM spare_parts WHERE (:search = '' OR name LIKE :search OR sku LIKE :search
+-        OR category LIKE :search OR modelCompatibility LIKE :search) AND (:activeOnly = 0 OR active = 1)
++        OR category LIKE :search OR brand LIKE :search OR modelCompatibility LIKE :search) AND (:activeOnly = 0 OR active = 1)
+         ORDER BY active DESC, name COLLATE NOCASE"""
+     )
+     fun observeSearch(search: String, activeOnly: Boolean = true): Flow<List<SparePartEntity>>
+--- maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/IgpApp.kt	2026-07-20 09:07:50.000000000 +0000
++++ maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/IgpApp.kt	2026-08-25 20:20:58.183285213 +0000
+@@ -1,5 +1,7 @@
+ package com.infinitygreen.maintenance.rebuild.ui
+ 
++import androidx.compose.animation.EnterTransition
++import androidx.compose.animation.ExitTransition
+ import androidx.compose.foundation.Image
+ import androidx.compose.foundation.layout.*
+ import androidx.compose.material.icons.Icons
+@@ -217,7 +219,15 @@
+                 }
+             }
+         ) { padding ->
+-            NavHost(navController, Routes.DASHBOARD, Modifier.padding(padding)) {
++            NavHost(
++                navController = navController,
++                startDestination = Routes.DASHBOARD,
++                modifier = Modifier.padding(padding),
++                enterTransition = { EnterTransition.None },
++                exitTransition = { ExitTransition.None },
++                popEnterTransition = { EnterTransition.None },
++                popExitTransition = { ExitTransition.None }
++            ) {
+                 composable(Routes.DASHBOARD) { entry ->
+                     val scanned = entry.savedStateHandle.getStateFlow("scannedSerial", "").collectAsStateWithLifecycle()
+                     LaunchedEffect(scanned.value) {
+--- maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/CatalogScreens.kt	2026-07-20 09:07:50.000000000 +0000
++++ maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/CatalogScreens.kt	2026-08-25 20:11:50.874979612 +0000
+@@ -42,6 +42,7 @@
+     val allParts by viewModel.allParts.collectAsStateWithLifecycle()
+     var query by remember { mutableStateOf("") }
+     var showInactive by remember { mutableStateOf(false) }
++    var selectedCategory by remember { mutableStateOf<String?>(null) }
+     var editing by remember { mutableStateOf<SparePartEntity?>(null) }
+     var correcting by remember { mutableStateOf<SparePartEntity?>(null) }
+     val visibleParts = remember(parts, allParts, showInactive, query) {
+@@ -51,13 +52,31 @@
+             .filter {
+                 val needle = query.trim()
+                 needle.isBlank() || listOf(it.name, it.sku, it.category, it.brand, it.modelCompatibility)
+                     .any { value -> value.contains(needle, ignoreCase = true) }
+             }
+     }
++    val categories = remember(allParts) {
++        allParts.map { it.category.trim() }.filter { it.isNotBlank() }.distinctBy { it.lowercase() }.sortedBy { it.lowercase() }
++    }
++    val filteredParts = remember(visibleParts, selectedCategory) {
++        selectedCategory?.let { category -> visibleParts.filter { it.category.equals(category, ignoreCase = true) } } ?: visibleParts
++    }
+     Column(Modifier.fillMaxSize().padding(16.dp)) {
+         Row(verticalAlignment = Alignment.CenterVertically) {
+             OutlinedTextField(query, { query = it }, modifier = Modifier.weight(1f), leadingIcon = { Icon(Icons.Default.Search, null) }, placeholder = { Text(stringResource(R.string.search)) }, singleLine = true)
+             Spacer(Modifier.width(8.dp)); FilledIconButton(onClick = { editing = SparePartEntity(sku = "", name = "", category = "", brand = "", modelCompatibility = "", unit = "piece", purchasePrice = BigDecimal.ZERO, sellingPrice = BigDecimal.ZERO, quantityInStock = BigDecimal.ZERO, minimumStockLevel = BigDecimal.ZERO, supplier = "", storageLocation = "", notes = "") }) { Icon(Icons.Default.Add, stringResource(R.string.add)) }
+         }
++        if (categories.isNotEmpty()) {
++            LazyRow(
++                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
++                horizontalArrangement = Arrangement.spacedBy(8.dp)
++            ) {
++                item {
++                    FilterChip(
++                        selected = selectedCategory == null,
++                        onClick = { selectedCategory = null },
++                        label = { Text(stringResource(R.string.all_categories)) }
++                    )
++                }
++                items(categories) { category ->
++                    FilterChip(
++                        selected = selectedCategory?.equals(category, true) == true,
++                        onClick = { selectedCategory = if (selectedCategory?.equals(category, true) == true) null else category },
++                        label = { Text(category) }
++                    )
++                }
++            }
++        }
+ 
+-        if (visibleParts.isEmpty()) {
++        if (filteredParts.isEmpty()) {
+             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(stringResource(R.string.no_spare_parts)) }
+         } else {
+             LazyColumn(contentPadding = PaddingValues(vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+-                items(visibleParts, key = { it.id }) { part ->
++                items(filteredParts, key = { it.id }) { part ->
+                     Card(Modifier.fillMaxWidth().clickable { editing = part }) {
+                         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                             Column(Modifier.weight(1f)) {
+@@ -68,15 +87,22 @@
+                                         AssistChip({}, { Text(stringResource(R.string.low_stock)) }, enabled = false)
+                                     }
+                                 }
+-                                Text("${part.sku} · ${part.category} · ${part.quantityInStock} ${part.unit}", color = MaterialTheme.colorScheme.onSurfaceVariant)
++                                Text(
++                                    listOf(part.sku, part.brand, part.modelCompatibility)
++                                        .filter { it.isNotBlank() }
++                                        .joinToString(" · "),
++                                    color = MaterialTheme.colorScheme.onSurfaceVariant
++                                )
++                                if (part.category.isNotBlank()) {
++                                    Text(part.category, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
++                                }
++                                if (part.quantityInStock > BigDecimal.ZERO) {
++                                    Text(
++                                        "${stringResource(R.string.stock)}: ${part.quantityInStock.stripTrailingZeros().toPlainString()}",
++                                        color = MaterialTheme.colorScheme.primary
++                                    )
++                                }
+                             }
+-                            Column(horizontalAlignment = Alignment.End) {
+-                                Text("${part.sellingPrice} ${part.currency.name}")
+-                                IconButton(onClick = { correcting = part }) { Icon(Icons.Default.Inventory, stringResource(R.string.stock_correction)) }
++                            IconButton(onClick = { correcting = part }) {
++                                Icon(Icons.Default.Inventory, stringResource(R.string.stock_correction))
+                             }
+                         }
+                     }
+@@ -91,22 +117,60 @@
+ @Composable
+ private fun SparePartDialog(initial: SparePartEntity, onDismiss: () -> Unit, onSave: (SparePartEntity) -> Unit) {
+     var item by remember(initial) { mutableStateOf(initial) }
++    var stockText by remember(initial) {
++        mutableStateOf(if (initial.id == 0L && initial.quantityInStock.compareTo(BigDecimal.ZERO) == 0) "" else initial.quantityInStock.stripTrailingZeros().toPlainString())
++    }
++    val stockValue = stockText.trim().takeIf { it.isNotEmpty() }?.toBigDecimalOrNull()
++    val stockValid = stockText.isBlank() || (stockValue != null && stockValue >= BigDecimal.ZERO)
++
+     AlertDialog(
+         onDismissRequest = onDismiss,
+         title = { Text(stringResource(if (initial.id == 0L) R.string.add_spare_part_title else R.string.edit_spare_part)) },
+         text = {
+             LazyColumn(Modifier.heightIn(max = 560.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+-                item { DialogText(R.string.sku, item.sku) { item = item.copy(sku = it) } }
++                item { DialogText(R.string.serial_number, item.sku) { item = item.copy(sku = it) } }
+                 item { DialogText(R.string.part_name, item.name) { item = item.copy(name = it) } }
+                 item { DialogText(R.string.category, item.category) { item = item.copy(category = it) } }
+                 item { DialogText(R.string.brand, item.brand) { item = item.copy(brand = it) } }
+-                item { DialogText(R.string.model_compatibility, item.modelCompatibility) { item = item.copy(modelCompatibility = it) } }
+-                item { DialogText(R.string.unit, item.unit) { item = item.copy(unit = it) } }
+-                item { MoneyText(R.string.purchase_price, item.purchasePrice) { item = item.copy(purchasePrice = it) } }
+-                item { MoneyText(R.string.selling_price, item.sellingPrice) { item = item.copy(sellingPrice = it) } }
+-                item { MoneyText(R.string.current_stock, item.quantityInStock) { item = item.copy(quantityInStock = it) } }
+-                item { MoneyText(R.string.minimum_stock, item.minimumStockLevel) { item = item.copy(minimumStockLevel = it) } }
+-                item { DialogText(R.string.supplier, item.supplier) { item = item.copy(supplier = it) } }
+-                item { DialogText(R.string.storage_location, item.storageLocation) { item = item.copy(storageLocation = it) } }
+-                item { DialogText(R.string.notes, item.notes) { item = item.copy(notes = it) } }
++                item { DialogText(R.string.model, item.modelCompatibility) { item = item.copy(modelCompatibility = it) } }
++                item {
++                    OutlinedTextField(
++                        value = item.notes,
++                        onValueChange = { item = item.copy(notes = it) },
++                        modifier = Modifier.fillMaxWidth(),
++                        label = { Text(stringResource(R.string.notes)) },
++                        minLines = 2,
++                        maxLines = 4
++                    )
++                }
++                item {
++                    OutlinedTextField(
++                        value = stockText,
++                        onValueChange = { if (it.matches(Regex("\\d*(\\.\\d*)?"))) stockText = it },
++                        modifier = Modifier.fillMaxWidth(),
++                        label = { Text(stringResource(R.string.optional_suffix, stringResource(R.string.current_stock))) },
++                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Decimal),
++                        singleLine = true,
++                        isError = !stockValid
++                    )
++                }
+             }
+         },
+-        confirmButton = { Button(onClick = { onSave(item) }, enabled = item.sku.isNotBlank() && item.name.isNotBlank()) { Text(stringResource(R.string.save)) } },
++        confirmButton = {
++            Button(
++                onClick = {
++                    onSave(
++                        item.copy(
++                            sku = item.sku.trim(),
++                            name = item.name.trim(),
++                            category = item.category.trim(),
++                            brand = item.brand.trim(),
++                            modelCompatibility = item.modelCompatibility.trim(),
++                            notes = item.notes.trim(),
++                            quantityInStock = stockValue ?: BigDecimal.ZERO
++                        )
++                    )
++                },
++                enabled = item.name.isNotBlank() && stockValid
++            ) { Text(stringResource(R.string.save)) }
++        },
+         dismissButton = { TextButton(onDismiss) { Text(stringResource(R.string.cancel)) } }
+     )
+ }
+--- maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/ReportFormScreen.kt	2026-08-25 20:13:02.529360657 +0000
++++ maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/ReportFormScreen.kt	2026-08-25 20:20:58.183570299 +0000
+@@ -718,7 +718,9 @@
+     ModalBottomSheet(
+         onDismissRequest = onDismiss,
+         sheetState = sheetState,
+-        dragHandle = null
++        dragHandle = null,
++        containerColor = MaterialTheme.colorScheme.surface,
++        scrimColor = MaterialTheme.colorScheme.scrim.copy(alpha = 0.72f)
+     ) {
+         Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f)) {
+             Row(
+--- maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/viewmodel/AppViewModels.kt	2026-08-25 20:13:02.529360657 +0000
++++ maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/viewmodel/AppViewModels.kt	2026-08-25 20:11:50.878979589 +0000
+@@ -214,7 +214,7 @@
+     val allParts = repo.spareParts(false, "").stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+     fun search(value: String) { query.value = value }
+     fun inactive(value: Boolean) { showInactive.value = value }
+-    fun save(part: SparePartEntity) { viewModelScope.launch { repo.saveSparePart(part) } }
++    fun save(part: SparePartEntity) { viewModelScope.launch { repo.saveSparePart(part.copy(active = true)) } }
+     fun correct(partId: Long, quantity: BigDecimal, reason: String) { viewModelScope.launch { repo.correctStock(partId, quantity, reason) } }
+ }
+ 
+--- maintenance-v140/app/src/main/res/values/strings.xml	2026-08-25 20:13:02.529360657 +0000
++++ maintenance-v140/app/src/main/res/values/strings.xml	2026-08-25 20:11:50.878979589 +0000
+@@ -573,4 +573,6 @@
+     <string name="save_data">Save Data</string>
+     <string name="pdf_and_data">PDF + Data</string>
+     <string name="whatsapp_pdf">WhatsApp PDF</string>
++    <string name="all_categories">All</string>
++    <string name="optional_suffix">%1$s (optional)</string>
+ </resources>
+--- maintenance-v140/app/src/main/res/values-ar/strings.xml	2026-08-25 20:13:02.529360657 +0000
++++ maintenance-v140/app/src/main/res/values-ar/strings.xml	2026-08-25 20:11:50.878979589 +0000
+@@ -573,4 +573,6 @@
+     <string name="save_data">حفظ البيانات</string>
+     <string name="pdf_and_data">PDF + البيانات</string>
+     <string name="whatsapp_pdf">PDF عبر واتساب</string>
++    <string name="all_categories">الكل</string>
++    <string name="optional_suffix">%1$s (اختياري)</string>
+ </resources>
