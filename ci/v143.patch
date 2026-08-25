@@ -1,0 +1,288 @@
+--- maintenance-v140/app/build.gradle.kts	2026-08-25 20:11:52.000000000 +0000
++++ maintenance-v140/app/build.gradle.kts	2026-08-25 21:51:55.352135127 +0000
+@@ -13,8 +13,8 @@
+         applicationId = "com.infinitygreen.maintenance.rebuild"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 10402
+-        versionName = "1.4.2"
++        versionCode = 10403
++        versionName = "1.4.3"
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+         vectorDrawables.useSupportLibrary = true
+     }
+--- maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/CatalogScreens.kt	2026-08-25 20:11:49.000000000 +0000
++++ maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/CatalogScreens.kt	2026-08-25 21:51:55.350885695 +0000
+@@ -1,9 +1,11 @@
+ package com.infinitygreen.maintenance.rebuild.ui.screens
+ 
+ import android.content.Intent
++import android.view.WindowManager
+ import androidx.activity.compose.rememberLauncherForActivityResult
+ import androidx.activity.result.contract.ActivityResultContracts
+ import androidx.compose.foundation.clickable
++import androidx.compose.foundation.shape.RoundedCornerShape
+ import androidx.compose.foundation.layout.*
+ import androidx.compose.foundation.lazy.LazyColumn
+ import androidx.compose.foundation.lazy.LazyRow
+@@ -15,9 +17,13 @@
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.platform.LocalContext
++import androidx.compose.ui.platform.LocalView
+ import androidx.compose.ui.res.stringResource
+ import androidx.compose.ui.text.input.KeyboardType
+ import androidx.compose.ui.unit.dp
++import androidx.compose.ui.window.Dialog
++import androidx.compose.ui.window.DialogProperties
++import androidx.compose.ui.window.DialogWindowProvider
+ import androidx.hilt.navigation.compose.hiltViewModel
+ import androidx.lifecycle.compose.collectAsStateWithLifecycle
+ import com.infinitygreen.maintenance.rebuild.R
+@@ -31,6 +37,19 @@
+ import com.infinitygreen.maintenance.rebuild.ui.viewmodel.InventoryViewModel
+ import java.math.BigDecimal
+ 
++private val sparePartCategoryPresets = listOf(
++    "PCB / Board",
++    "Power Module",
++    "Fan",
++    "Relay / Contactor",
++    "Fuse / Breaker",
++    "Cable / Connector",
++    "Display / Control",
++    "Sensor",
++    "Mechanical",
++    "Other"
++)
++
+ @Composable
+ fun SparePartsScreen(viewModel: InventoryViewModel = hiltViewModel()) {
+     val parts by viewModel.parts.collectAsStateWithLifecycle()
+@@ -140,62 +159,149 @@
+     var stockText by remember(initial) {
+         mutableStateOf(if (initial.id == 0L && initial.quantityInStock.compareTo(BigDecimal.ZERO) == 0) "" else initial.quantityInStock.stripTrailingZeros().toPlainString())
+     }
++    var categoryMenuExpanded by remember { mutableStateOf(false) }
+     val stockValue = stockText.trim().takeIf { it.isNotEmpty() }?.toBigDecimalOrNull()
+     val stockValid = stockText.isBlank() || (stockValue != null && stockValue >= BigDecimal.ZERO)
++    val dialogView = LocalView.current
+ 
+-    AlertDialog(
++    Dialog(
+         onDismissRequest = onDismiss,
+-        title = { Text(stringResource(if (initial.id == 0L) R.string.add_spare_part_title else R.string.edit_spare_part)) },
+-        text = {
+-            LazyColumn(Modifier.heightIn(max = 560.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+-                item { DialogText(R.string.serial_number, item.sku) { item = item.copy(sku = it) } }
+-                item { DialogText(R.string.part_name, item.name) { item = item.copy(name = it) } }
+-                item { DialogText(R.string.category, item.category) { item = item.copy(category = it) } }
+-                item { DialogText(R.string.brand, item.brand) { item = item.copy(brand = it) } }
+-                item { DialogText(R.string.model, item.modelCompatibility) { item = item.copy(modelCompatibility = it) } }
+-                item {
+-                    OutlinedTextField(
+-                        value = item.notes,
+-                        onValueChange = { item = item.copy(notes = it) },
+-                        modifier = Modifier.fillMaxWidth(),
+-                        label = { Text(stringResource(R.string.notes)) },
+-                        minLines = 2,
+-                        maxLines = 4
+-                    )
++        properties = DialogProperties(
++            usePlatformDefaultWidth = false,
++            decorFitsSystemWindows = true,
++            dismissOnBackPress = true,
++            dismissOnClickOutside = false
++        )
++    ) {
++        SideEffect {
++            (dialogView.parent as? DialogWindowProvider)?.window?.apply {
++                setWindowAnimations(0)
++                setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
++            }
++        }
++
++        Surface(
++            modifier = Modifier
++                .fillMaxWidth(0.92f)
++                .widthIn(max = 620.dp)
++                .heightIn(max = 610.dp),
++            shape = RoundedCornerShape(28.dp),
++            color = MaterialTheme.colorScheme.surface,
++            tonalElevation = 6.dp
++        ) {
++            Column(Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
++                Text(
++                    stringResource(if (initial.id == 0L) R.string.add_spare_part_title else R.string.edit_spare_part),
++                    style = MaterialTheme.typography.headlineSmall
++                )
++                Spacer(Modifier.height(12.dp))
++
++                LazyColumn(
++                    modifier = Modifier.weight(1f, fill = false),
++                    verticalArrangement = Arrangement.spacedBy(8.dp)
++                ) {
++                    item {
++                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
++                            Box(Modifier.weight(1.35f)) {
++                                DialogText(R.string.serial_number, item.sku) { item = item.copy(sku = it) }
++                            }
++                            OutlinedTextField(
++                                value = stockText,
++                                onValueChange = { if (it.matches(Regex("\\d*(\\.\\d*)?"))) stockText = it },
++                                modifier = Modifier.weight(0.75f),
++                                label = { Text(stringResource(R.string.current_stock)) },
++                                placeholder = { Text(stringResource(R.string.optional)) },
++                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Decimal),
++                                singleLine = true,
++                                isError = !stockValid
++                            )
++                        }
++                    }
++                    item { DialogText(R.string.part_name, item.name) { item = item.copy(name = it) } }
++                    item {
++                        Box(Modifier.fillMaxWidth()) {
++                            OutlinedTextField(
++                                value = item.category,
++                                onValueChange = { item = item.copy(category = it) },
++                                modifier = Modifier.fillMaxWidth(),
++                                label = { Text(stringResource(R.string.category)) },
++                                singleLine = true,
++                                trailingIcon = {
++                                    IconButton(onClick = { categoryMenuExpanded = !categoryMenuExpanded }) {
++                                        Icon(
++                                            if (categoryMenuExpanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
++                                            contentDescription = stringResource(R.string.category)
++                                        )
++                                    }
++                                }
++                            )
++                            DropdownMenu(
++                                expanded = categoryMenuExpanded,
++                                onDismissRequest = { categoryMenuExpanded = false },
++                                modifier = Modifier.heightIn(max = 330.dp)
++                            ) {
++                                sparePartCategoryPresets.forEach { category ->
++                                    DropdownMenuItem(
++                                        text = { Text(category) },
++                                        onClick = {
++                                            item = item.copy(category = category)
++                                            categoryMenuExpanded = false
++                                        }
++                                    )
++                                }
++                            }
++                        }
++                    }
++                    item {
++                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
++                            Box(Modifier.weight(1f)) {
++                                DialogText(R.string.brand, item.brand) { item = item.copy(brand = it) }
++                            }
++                            Box(Modifier.weight(1f)) {
++                                DialogText(R.string.model, item.modelCompatibility) { item = item.copy(modelCompatibility = it) }
++                            }
++                        }
++                    }
++                    item {
++                        OutlinedTextField(
++                            value = item.notes,
++                            onValueChange = { item = item.copy(notes = it) },
++                            modifier = Modifier.fillMaxWidth(),
++                            label = { Text(stringResource(R.string.notes)) },
++                            minLines = 1,
++                            maxLines = 2
++                        )
++                    }
+                 }
+-                item {
+-                    OutlinedTextField(
+-                        value = stockText,
+-                        onValueChange = { if (it.matches(Regex("\\d*(\\.\\d*)?"))) stockText = it },
+-                        modifier = Modifier.fillMaxWidth(),
+-                        label = { Text(stringResource(R.string.optional_suffix, stringResource(R.string.current_stock))) },
+-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Decimal),
+-                        singleLine = true,
+-                        isError = !stockValid
+-                    )
++
++                Spacer(Modifier.height(12.dp))
++                Row(
++                    modifier = Modifier.fillMaxWidth(),
++                    horizontalArrangement = Arrangement.End,
++                    verticalAlignment = Alignment.CenterVertically
++                ) {
++                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
++                    Spacer(Modifier.width(8.dp))
++                    Button(
++                        onClick = {
++                            onSave(
++                                item.copy(
++                                    sku = item.sku.trim(),
++                                    name = item.name.trim(),
++                                    category = item.category.trim(),
++                                    brand = item.brand.trim(),
++                                    modelCompatibility = item.modelCompatibility.trim(),
++                                    notes = item.notes.trim(),
++                                    quantityInStock = stockValue ?: BigDecimal.ZERO
++                                )
++                            )
++                        },
++                        enabled = item.name.isNotBlank() && item.sku.isNotBlank() && stockValid
++                    ) { Text(stringResource(R.string.save)) }
+                 }
+             }
+-        },
+-        confirmButton = {
+-            Button(
+-                onClick = {
+-                    onSave(
+-                        item.copy(
+-                            sku = item.sku.trim(),
+-                            name = item.name.trim(),
+-                            category = item.category.trim(),
+-                            brand = item.brand.trim(),
+-                            modelCompatibility = item.modelCompatibility.trim(),
+-                            notes = item.notes.trim(),
+-                            quantityInStock = stockValue ?: BigDecimal.ZERO
+-                        )
+-                    )
+-                },
+-                enabled = item.name.isNotBlank() && item.sku.isNotBlank() && stockValid
+-            ) { Text(stringResource(R.string.save)) }
+-        },
+-        dismissButton = { TextButton(onDismiss) { Text(stringResource(R.string.cancel)) } }
+-    )
++        }
++    }
+ }
+ 
+ @Composable private fun StockCorrectionDialog(part: SparePartEntity, onDismiss: () -> Unit, onSave: (BigDecimal, String) -> Unit) {
+--- maintenance-v140/app/src/main/res/values/strings.xml	2026-08-25 20:11:51.000000000 +0000
++++ maintenance-v140/app/src/main/res/values/strings.xml	2026-08-25 21:52:24.771738320 +0000
+@@ -453,4 +453,5 @@
+     <string name="saved_actions_hint">Choose what you want to do with the saved report.</string>
+ 
+     <string name="all_categories">All categories</string>
++    <string name="optional">Optional</string>
+ </resources>
+--- maintenance-v140/app/src/main/res/values-ar/strings.xml	2026-08-25 20:11:51.000000000 +0000
++++ maintenance-v140/app/src/main/res/values-ar/strings.xml	2026-08-25 21:52:24.772268228 +0000
+@@ -453,4 +453,5 @@
+     <string name="saved_actions_hint">اختر ما تريد فعله بالتقرير المحفوظ.</string>
+ 
+     <string name="all_categories">كل الفئات</string>
++    <string name="optional">اختياري</string>
+ </resources>
+--- /dev/null	2026-08-25 17:54:26.579927885 +0000
++++ maintenance-v140/CHANGES_1.4.3.md	2026-08-25 21:51:55.352233464 +0000
+@@ -0,0 +1,9 @@
++# Changes in 1.4.3
++
++- Kept the simplified spare-parts catalog fields: serial number, part name, category, brand, model, notes, and optional current stock.
++- Made Add/Edit Spare Part substantially more compact by placing Serial + Current stock and Brand + Model on shared rows.
++- Added quick category suggestions while keeping category free-text for custom values.
++- Preserved the category filter chips above the Spare Parts list for faster searching.
++- Disabled dialog window animations for the spare-part editor to avoid the previous dancing/bouncing window effect.
++- Preserved all v1.4.2 PDF header, ghosting, and report-editor stability fixes.
++- Version updated to 1.4.3 (10403).
