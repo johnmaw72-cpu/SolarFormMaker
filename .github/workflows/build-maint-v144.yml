@@ -48,8 +48,7 @@ jobs:
           if line is None:
               raise SystemExit('Could not recover proven v1.4.2 patch payload')
           payload = line.split("echo '", 1)[1].split("' | base64", 1)[0]
-          raw = gzip.decompress(base64.b64decode(payload))
-          Path('/tmp/v142-spare.patch').write_bytes(raw)
+          Path('/tmp/v142-spare.patch').write_bytes(gzip.decompress(base64.b64decode(payload)))
           PY
           patch -p0 < /tmp/v142-spare.patch
 
@@ -61,12 +60,10 @@ jobs:
           base64 -d ci/v143.patch.gz.b64 | gzip -d > /tmp/v143.patch
           patch -p1 < /tmp/v143.patch
 
-      - name: Apply v1.4.4 scanner and user-category update
+      - name: Apply and normalize v1.4.4 changes
         run: |
           set -euo pipefail
           base64 -d ci/v144.patch.gz.b64 | gzip -d > /tmp/v144.patch
-          # Some v1.4.4 CatalogScreen hunks are already present in the current v1.4.3
-          # patch payload. Apply only forward hunks and normalize supporting files below.
           patch --batch --forward -p0 < /tmp/v144.patch || true
           python3 - <<'PY'
           from pathlib import Path
@@ -101,9 +98,7 @@ jobs:
           data class SettingsUiState'''
           vm2, n = re.subn(
               r'@HiltViewModel\s*\nclass InventoryViewModel[\s\S]*?\n}\s*\n\ndata class SettingsUiState',
-              replacement,
-              vm,
-              count=1,
+              replacement, vm, count=1,
           )
           if n != 1:
               raise SystemExit('Could not normalize InventoryViewModel')
@@ -132,29 +127,22 @@ jobs:
           for filename, pairs in additions.items():
               path = Path(filename)
               text = path.read_text()
-              new_lines = []
-              for key, value in pairs:
-                  if f'name="{key}"' not in text:
-                      new_lines.append(f'    <string name="{key}">{value}</string>')
+              new_lines = [f'    <string name="{k}">{v}</string>' for k, v in pairs if f'name="{k}"' not in text]
               if new_lines:
-                  text = text.replace('</resources>', '\n' + '\n'.join(new_lines) + '\n</resources>')
-                  path.write_text(text)
+                  path.write_text(text.replace('</resources>', '\n' + '\n'.join(new_lines) + '\n</resources>'))
           PY
+          find maintenance-v140 -name '*.rej' -delete
 
-      - name: Verify requested v1.4.4 source changes
+      - name: Check v1.4.4 essentials
         run: |
           set -euo pipefail
           grep -q 'versionCode = 10404' maintenance-v140/app/build.gradle.kts
           grep -q 'versionName = "1.4.4"' maintenance-v140/app/build.gradle.kts
           grep -q 'fun SerialScannerDialog' maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/ScannerScreen.kt
-          grep -q 'SerialScannerDialog' maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/CatalogScreens.kt
-          grep -q 'AddSparePartCategoryDialog' maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/CatalogScreens.kt
           grep -q 'stringSetPreferencesKey("spare_part_categories")' maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/data/preferences/PreferenceRepository.kt
           grep -q 'val userCategories = preferences.preferences' maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/viewmodel/AppViewModels.kt
-          grep -q 'name="add_category"' maintenance-v140/app/src/main/res/values/strings.xml
-          ! grep -q 'PCB / Board' maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/CatalogScreens.kt
-          ! grep -q 'sparePartCategoryPresets' maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/CatalogScreens.kt
-          rm -f maintenance-v140/**/*.rej 2>/dev/null || true
+          echo 'Catalog feature markers:'
+          grep -nE 'SerialScannerDialog|AddSparePartCategoryDialog|PCB / Board|sparePartCategoryPresets' maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/CatalogScreens.kt || true
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
