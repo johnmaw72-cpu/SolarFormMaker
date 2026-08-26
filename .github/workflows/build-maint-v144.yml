@@ -133,7 +133,6 @@ jobs:
                   path.write_text(text.replace('</resources>', '\n' + '\n'.join(new_lines) + '\n</resources>'))
           PY
 
-          # Force the exact reviewed v1.4.4 Spare Parts screen and matching navigation.
           base64 -d ci/v144-CatalogScreens.kt.gz.b64 | gzip -d > \
             maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/CatalogScreens.kt
           base64 -d ci/v144-IgpApp.kt.gz.b64 | gzip -d > \
@@ -186,23 +185,73 @@ jobs:
           cp ci/igp-maint-debug.keystore "$HOME/.android/debug.keystore"
           chmod 600 "$HOME/.android/debug.keystore"
 
-      - name: Build debug APK
+      - name: Build normal debug APK
         working-directory: maintenance-v140
         run: gradle --no-daemon --stacktrace assembleDebug
 
-      - name: Verify APK
+      - name: Verify normal APK
         run: |
           test -f maintenance-v140/app/build/outputs/apk/debug/app-debug.apk
           cp maintenance-v140/app/build/outputs/apk/debug/app-debug.apk IGP-Technical-Maintenance-Reports-v1.4.4-Debug.apk
           sha256sum IGP-Technical-Maintenance-Reports-v1.4.4-Debug.apk > IGP-Technical-Maintenance-Reports-v1.4.4-Debug.apk.sha256
           ls -lh IGP-Technical-Maintenance-Reports-v1.4.4-Debug.apk
 
-      - name: Upload APK
+      - name: Prepare side-by-side migration package
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          gradle = Path('maintenance-v140/app/build.gradle.kts')
+          text = gradle.read_text()
+          old = 'applicationId = "com.infinitygreen.maintenance.rebuild"'
+          new = 'applicationId = "com.infinitygreen.maintenance.rebuild.migration"'
+          if old not in text:
+              raise SystemExit('Original applicationId not found')
+          text = text.replace(old, new, 1)
+          text = text.replace('versionName = "1.4.4"', 'versionName = "1.4.4-migration"', 1)
+          gradle.write_text(text)
+
+          en = Path('maintenance-v140/app/src/main/res/values/strings.xml')
+          en_text = en.read_text().replace(
+              '<string name="app_name">IGP Technical Maintenance Reports</string>',
+              '<string name="app_name">IGP Technical Maintenance Reports - New</string>',
+              1,
+          )
+          en.write_text(en_text)
+
+          ar = Path('maintenance-v140/app/src/main/res/values-ar/strings.xml')
+          ar_text = ar.read_text().replace(
+              '<string name="app_name">تقارير الصيانة الفنية IGP</string>',
+              '<string name="app_name">تقارير الصيانة الفنية IGP - الجديد</string>',
+              1,
+          )
+          ar.write_text(ar_text)
+          PY
+          grep -q 'applicationId = "com.infinitygreen.maintenance.rebuild.migration"' maintenance-v140/app/build.gradle.kts
+          grep -q 'versionName = "1.4.4-migration"' maintenance-v140/app/build.gradle.kts
+
+      - name: Build migration APK
+        working-directory: maintenance-v140
+        run: gradle --no-daemon --stacktrace clean assembleDebug
+
+      - name: Verify migration APK
+        run: |
+          set -euo pipefail
+          test -f maintenance-v140/app/build/outputs/apk/debug/app-debug.apk
+          unzip -p maintenance-v140/app/build/outputs/apk/debug/app-debug.apk AndroidManifest.xml | strings -el | grep -q 'com.infinitygreen.maintenance.rebuild.migration'
+          cp maintenance-v140/app/build/outputs/apk/debug/app-debug.apk IGP-Technical-Maintenance-Reports-v1.4.4-Migration.apk
+          sha256sum IGP-Technical-Maintenance-Reports-v1.4.4-Migration.apk > IGP-Technical-Maintenance-Reports-v1.4.4-Migration.apk.sha256
+          ls -lh IGP-Technical-Maintenance-Reports-v1.4.4-Migration.apk
+
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: IGP-Technical-Maintenance-Reports-v1.4.4-APK
+          name: IGP-Technical-Maintenance-Reports-v1.4.4-Normal-and-Migration
           path: |
             IGP-Technical-Maintenance-Reports-v1.4.4-Debug.apk
             IGP-Technical-Maintenance-Reports-v1.4.4-Debug.apk.sha256
+            IGP-Technical-Maintenance-Reports-v1.4.4-Migration.apk
+            IGP-Technical-Maintenance-Reports-v1.4.4-Migration.apk.sha256
           if-no-files-found: error
           retention-days: 30
