@@ -1,0 +1,170 @@
+--- maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/ScannerScreen.kt
++++ maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/ScannerScreen.kt
+@@ -12,10 +12,13 @@
+ import android.os.VibratorManager
+ import android.view.MotionEvent
+ import android.view.WindowManager
++import android.util.Size
+ import androidx.activity.compose.rememberLauncherForActivityResult
+ import androidx.activity.result.contract.ActivityResultContracts
+ import androidx.camera.core.*
+ import androidx.camera.lifecycle.ProcessCameraProvider
++import androidx.camera.core.resolutionselector.ResolutionSelector
++import androidx.camera.core.resolutionselector.ResolutionStrategy
+ import androidx.camera.view.PreviewView
+ import androidx.compose.foundation.background
+ import androidx.compose.foundation.border
+@@ -48,6 +51,8 @@
+ import com.infinitygreen.maintenance.rebuild.ui.viewmodel.ScannerViewModel
+ import java.util.concurrent.Executors
+ import java.util.concurrent.atomic.AtomicBoolean
++import java.util.concurrent.atomic.AtomicInteger
++import java.util.concurrent.atomic.AtomicReference
+ 
+ @Composable
+ fun ScannerScreen(
+@@ -246,7 +251,15 @@
+     val owner = LocalLifecycleOwner.current
+     val executor = remember { Executors.newSingleThreadExecutor() }
+     val handled = remember { AtomicBoolean(false) }
+-    LaunchedEffect(active) { if (active) handled.set(false) }
++    val lastCandidate = remember { AtomicReference<String?>(null) }
++    val candidateHits = remember { AtomicInteger(0) }
++    LaunchedEffect(active) {
++        if (active) {
++            handled.set(false)
++            lastCandidate.set(null)
++            candidateHits.set(0)
++        }
++    }
+     val scanner = remember {
+         BarcodeScanning.getClient(
+             BarcodeScannerOptions.Builder().setBarcodeFormats(com.google.mlkit.vision.barcode.common.Barcode.FORMAT_ALL_FORMATS).build()
+@@ -262,17 +275,53 @@
+                 future.addListener({
+                     val provider = future.get()
+                     val preview = Preview.Builder().build().also { it.surfaceProvider = surfaceProvider }
+-                    val analysis = ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build()
++                    // Long, dense serial-number barcodes such as CODE 128 need substantially more
++                    // horizontal detail than CameraX's low default analysis size. 1080p gives the
++                    // decoder enough pixels per module while KEEP_ONLY_LATEST prevents backlog.
++                    val resolutionSelector = ResolutionSelector.Builder()
++                        .setResolutionStrategy(
++                            ResolutionStrategy(
++                                Size(1920, 1080),
++                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
++                            )
++                        )
++                        .build()
++                    val analysis = ImageAnalysis.Builder()
++                        .setResolutionSelector(resolutionSelector)
++                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
++                        .build()
+                     analysis.setAnalyzer(executor) { imageProxy ->
+                         val media = imageProxy.image
+                         if (media == null || handled.get()) { imageProxy.close(); return@setAnalyzer }
+-                        scanner.process(InputImage.fromMediaImage(media, imageProxy.imageInfo.rotationDegrees))
++                        val rotation = imageProxy.imageInfo.rotationDegrees
++                        val scanWidth = if (rotation == 90 || rotation == 270) media.height else media.width
++                        val scanHeight = if (rotation == 90 || rotation == 270) media.width else media.height
++                        scanner.process(InputImage.fromMediaImage(media, rotation))
+                             .addOnSuccessListener { codes ->
+-                                val value = codes.asSequence()
+-                                    .mapNotNull { it.rawValue }
+-                                    .map(::normalizeScannedSerial)
+-                                    .firstOrNull { it.isNotBlank() }
+-                                if (value != null && handled.compareAndSet(false, true)) onDetected(value)
++                                val candidate = codes.asSequence()
++                                    .filter { isBarcodeInsideSerialScanArea(it, scanWidth, scanHeight) }
++                                    .mapNotNull { code ->
++                                        val value = code.rawValue?.let(::normalizeScannedSerial).orEmpty()
++                                        if (isPlausibleSerialBarcode(value, code.format)) value else null
++                                    }
++                                    // Prefer the most complete serial if ML Kit reports more than one code.
++                                    .maxByOrNull { it.length }
++
++                                if (candidate == null) {
++                                    lastCandidate.set(null)
++                                    candidateHits.set(0)
++                                } else {
++                                    val hits = if (lastCandidate.get() == candidate) {
++                                        candidateHits.incrementAndGet()
++                                    } else {
++                                        lastCandidate.set(candidate)
++                                        candidateHits.set(1)
++                                        1
++                                    }
++                                    // Require the exact same result in two frames. This prevents a partial
++                                    // barcode at the edge of the view from being accepted as a false serial.
++                                    if (hits >= 2 && handled.compareAndSet(false, true)) onDetected(candidate)
++                                }
+                             }.addOnCompleteListener { imageProxy.close() }
+                     }
+                     runCatching {
+@@ -296,6 +345,53 @@
+     )
+ }
+ 
++
++private fun isBarcodeInsideSerialScanArea(
++    barcode: com.google.mlkit.vision.barcode.common.Barcode,
++    imageWidth: Int,
++    imageHeight: Int
++): Boolean {
++    val box = barcode.boundingBox ?: return false
++    if (imageWidth <= 0 || imageHeight <= 0) return false
++    val centerX = box.exactCenterX() / imageWidth.toFloat()
++    val centerY = box.exactCenterY() / imageHeight.toFloat()
++    val widthFraction = box.width() / imageWidth.toFloat()
++
++    // The visual scan frame is centered. Keep a slightly larger acceptance zone so camera
++    // preview/aspect-ratio differences do not reject valid codes, but reject edge fragments.
++    val centered = centerX in 0.12f..0.88f && centerY in 0.12f..0.88f
++    val isLinear = barcode.format == com.google.mlkit.vision.barcode.common.Barcode.FORMAT_CODE_128 ||
++        barcode.format == com.google.mlkit.vision.barcode.common.Barcode.FORMAT_CODE_39 ||
++        barcode.format == com.google.mlkit.vision.barcode.common.Barcode.FORMAT_CODE_93 ||
++        barcode.format == com.google.mlkit.vision.barcode.common.Barcode.FORMAT_CODABAR ||
++        barcode.format == com.google.mlkit.vision.barcode.common.Barcode.FORMAT_ITF ||
++        barcode.format == com.google.mlkit.vision.barcode.common.Barcode.FORMAT_EAN_13 ||
++        barcode.format == com.google.mlkit.vision.barcode.common.Barcode.FORMAT_EAN_8 ||
++        barcode.format == com.google.mlkit.vision.barcode.common.Barcode.FORMAT_UPC_A ||
++        barcode.format == com.google.mlkit.vision.barcode.common.Barcode.FORMAT_UPC_E
++    return centered && (!isLinear || widthFraction >= 0.14f)
++}
++
++private fun isPlausibleSerialBarcode(value: String, format: Int): Boolean {
++    if (value.length !in 6..96) return false
++    if (value.any { it.isISOControl() }) return false
++    // Serial labels commonly contain letters, digits, underscore, dash, slash and dots.
++    // QR/Data Matrix may contain a larger payload, which normalizeScannedSerial already reduces.
++    if (format == com.google.mlkit.vision.barcode.common.Barcode.FORMAT_CODE_128 ||
++        format == com.google.mlkit.vision.barcode.common.Barcode.FORMAT_CODE_39 ||
++        format == com.google.mlkit.vision.barcode.common.Barcode.FORMAT_CODE_93 ||
++        format == com.google.mlkit.vision.barcode.common.Barcode.FORMAT_CODABAR ||
++        format == com.google.mlkit.vision.barcode.common.Barcode.FORMAT_ITF ||
++        format == com.google.mlkit.vision.barcode.common.Barcode.FORMAT_EAN_13 ||
++        format == com.google.mlkit.vision.barcode.common.Barcode.FORMAT_EAN_8 ||
++        format == com.google.mlkit.vision.barcode.common.Barcode.FORMAT_UPC_A ||
++        format == com.google.mlkit.vision.barcode.common.Barcode.FORMAT_UPC_E
++    ) {
++        return value.all { it.isLetterOrDigit() || it == '_' || it == '-' || it == '/' || it == '.' }
++    }
++    return true
++}
++
+ private fun feedback(context: Context, vibrate: Boolean, sound: Boolean) {
+     if (sound) runCatching { ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80).apply { startTone(ToneGenerator.TONE_PROP_BEEP, 120); release() } }
+     if (vibrate) {
+--- maintenance-v140/app/build.gradle.kts
++++ maintenance-v140/app/build.gradle.kts
+@@ -13,8 +13,8 @@
+         applicationId = "com.infinitygreen.maintenance.rebuild"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 10404
+-        versionName = "1.4.4"
++        versionCode = 10405
++        versionName = "1.4.5"
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+         vectorDrawables.useSupportLibrary = true
+     }
