@@ -1,0 +1,222 @@
+name: Build IGP Maintenance v1.4.5 Code128 Scanner Fix
+
+on:
+  push:
+    branches: [ maintenance-build-v140 ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout build branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Reconstruct verified v1.4.0 source
+        run: |
+          set -euo pipefail
+          rm -f /tmp/v140.b64 /tmp/maintenance-v140.zip
+          cat ci/v140.part00 ci/v140.part01 ci/v140.part02 ci/v140.part03 ci/v140.part04 > /tmp/v140.b64
+          cat ci/v140.fix05.p00 ci/v140.fix05.p01 ci/v140.fix05.p02 ci/v140.fix05.p03 ci/v140.fix05.p04 | base64 -d | gzip -d >> /tmp/v140.b64
+          cat ci/v140.part06 >> /tmp/v140.b64
+          cat ci/v140.fix07.p00 ci/v140.fix07.p01 ci/v140.fix07.p02 ci/v140.fix07.p03 ci/v140.fix07.p04 | base64 -d | gzip -d >> /tmp/v140.b64
+          cat ci/v140.part08 ci/v140.part09 >> /tmp/v140.b64
+          cat ci/v140.part10.xz.b64 | base64 -d | xz -d >> /tmp/v140.b64
+          test "$(wc -c < /tmp/v140.b64)" -eq 186544
+          base64 -d /tmp/v140.b64 > /tmp/maintenance-v140.zip
+          echo 'a15b25d629089727e3e00da5d9304da989fc379c5df37ab1d85778fa6bb1294b  /tmp/maintenance-v140.zip' | sha256sum -c -
+          rm -rf maintenance-v140
+          mkdir -p maintenance-v140
+          unzip -q /tmp/maintenance-v140.zip -d maintenance-v140
+
+      - name: Apply v1.4.1 PDF header fix
+        run: patch -p0 < ci/v141.patch
+
+      - name: Recover proven v1.4.2 spare-parts patch
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin 60a69d6fa04a0f1d06eda20fc5ff1415b24cb62c
+          git show 60a69d6fa04a0f1d06eda20fc5ff1415b24cb62c:.github/workflows/build-maint-v140.yml > /tmp/old-v142.yml
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, gzip
+          text = Path('/tmp/old-v142.yml').read_text()
+          line = next((line for line in text.splitlines() if "echo 'H4s" in line and "| base64 -d | gzip -d | patch -p0" in line), None)
+          if line is None:
+              raise SystemExit('Could not recover proven v1.4.2 patch payload')
+          payload = line.split("echo '", 1)[1].split("' | base64", 1)[0]
+          Path('/tmp/v142-spare.patch').write_bytes(gzip.decompress(base64.b64decode(payload)))
+          PY
+          patch -p0 < /tmp/v142-spare.patch
+
+      - name: Apply v1.4.2 stable-window and ghosting fix
+        run: patch -p0 < ci/v142-ui.patch
+
+      - name: Apply v1.4.3 source changes
+        run: |
+          base64 -d ci/v143.patch.gz.b64 | gzip -d > /tmp/v143.patch
+          patch -p1 < /tmp/v143.patch
+
+      - name: Apply v1.4.4 scanner categories and Spare Parts UI
+        run: |
+          set -euo pipefail
+          base64 -d ci/v144.patch.gz.b64 | gzip -d > /tmp/v144.patch
+          patch --batch --forward -p0 < /tmp/v144.patch || true
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          vm_path = Path('maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/viewmodel/AppViewModels.kt')
+          vm = vm_path.read_text()
+          replacement = '''@HiltViewModel
+          class InventoryViewModel @Inject constructor(
+              private val repository: InventoryRepository,
+              private val preferences: PreferenceRepository
+          ) : ViewModel() {
+              private val query = MutableStateFlow("")
+              val allParts = repository.observeParts("")
+                  .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+              val parts = query.debounce(200).flatMapLatest(repository::observeParts)
+                  .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+              val userCategories = preferences.preferences
+                  .map { prefs -> prefs.sparePartCategories.sortedBy { it.lowercase() } }
+                  .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+              fun setQuery(value: String) { query.value = value }
+              fun addCategory(value: String) = viewModelScope.launch { preferences.addSparePartCategory(value) }
+              fun removeCategory(value: String) = viewModelScope.launch { preferences.removeSparePartCategory(value) }
+              fun save(item: SparePartEntity) = viewModelScope.launch {
+                  if (item.category.isNotBlank()) preferences.addSparePartCategory(item.category)
+                  repository.upsert(item.copy(active = true))
+              }
+              fun correct(id: Long, quantity: BigDecimal, reason: String) = viewModelScope.launch { repository.correctStock(id, quantity, reason) }
+          }
+
+          data class SettingsUiState'''
+          vm2, n = re.subn(
+              r'@HiltViewModel\s*\nclass InventoryViewModel[\s\S]*?\n}\s*\n\ndata class SettingsUiState',
+              replacement, vm, count=1,
+          )
+          if n != 1:
+              raise SystemExit('Could not normalize InventoryViewModel')
+          vm_path.write_text(vm2)
+
+          additions = {
+              'maintenance-v140/app/src/main/res/values/strings.xml': [
+                  ('add_category', 'Add category'),
+                  ('category_name', 'Category name'),
+                  ('category_already_exists', 'This category already exists.'),
+                  ('choose_category', 'Choose category'),
+                  ('scan_serial_number', 'Scan serial number'),
+                  ('scan_spare_part_serial', 'Scan spare part serial number'),
+                  ('scan_serial_auto_fill_hint', 'Point the camera at the barcode or QR code. The serial number will be filled automatically.'),
+              ],
+              'maintenance-v140/app/src/main/res/values-ar/strings.xml': [
+                  ('add_category', 'إضافة فئة'),
+                  ('category_name', 'اسم الفئة'),
+                  ('category_already_exists', 'هذه الفئة موجودة بالفعل.'),
+                  ('choose_category', 'اختيار الفئة'),
+                  ('scan_serial_number', 'مسح الرقم التسلسلي'),
+                  ('scan_spare_part_serial', 'مسح الرقم التسلسلي لقطعة الغيار'),
+                  ('scan_serial_auto_fill_hint', 'وجّه الكاميرا إلى الباركود أو رمز QR وسيتم إدخال الرقم التسلسلي تلقائياً.'),
+              ],
+          }
+          for filename, pairs in additions.items():
+              path = Path(filename)
+              text = path.read_text()
+              new_lines = [f'    <string name="{k}">{v}</string>' for k, v in pairs if f'name="{k}"' not in text]
+              if new_lines:
+                  path.write_text(text.replace('</resources>', '\n' + '\n'.join(new_lines) + '\n</resources>'))
+          PY
+
+          base64 -d ci/v144-CatalogScreens.kt.gz.b64 | gzip -d > maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/CatalogScreens.kt
+          base64 -d ci/v144-IgpApp.kt.gz.b64 | gzip -d > maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/IgpApp.kt
+          find maintenance-v140 -type f \( -name '*.orig' -o -name '*.rej' \) -delete
+
+      - name: Apply v1.4.5 dense Code128 scanner fix
+        run: |
+          set -euo pipefail
+          patch -p0 < ci/v145-scanner.patch
+
+      - name: Verify v1.4.5 scanner fix
+        run: |
+          set -euo pipefail
+          SCANNER=maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/ScannerScreen.kt
+          grep -q 'versionCode = 10405' maintenance-v140/app/build.gradle.kts
+          grep -q 'versionName = "1.4.5"' maintenance-v140/app/build.gradle.kts
+          grep -q 'Size(1920, 1080)' "$SCANNER"
+          grep -q 'ResolutionSelector.Builder' "$SCANNER"
+          grep -q 'candidateHits.incrementAndGet' "$SCANNER"
+          grep -q 'isBarcodeInsideSerialScanArea' "$SCANNER"
+          grep -q 'isPlausibleSerialBarcode' "$SCANNER"
+          grep -q 'FORMAT_ALL_FORMATS' "$SCANNER"
+          echo 'v1.4.5 scanner fix verification passed.'
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Set up Gradle 9.4.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Restore stable debug signing key
+        run: |
+          mkdir -p "$HOME/.android"
+          cp ci/igp-maint-debug.keystore "$HOME/.android/debug.keystore"
+          chmod 600 "$HOME/.android/debug.keystore"
+
+      - name: Build normal v1.4.5 APK
+        working-directory: maintenance-v140
+        run: gradle --no-daemon --stacktrace assembleDebug
+
+      - name: Save normal APK
+        run: |
+          test -f maintenance-v140/app/build/outputs/apk/debug/app-debug.apk
+          cp maintenance-v140/app/build/outputs/apk/debug/app-debug.apk IGP-Technical-Maintenance-Reports-v1.4.5-Debug.apk
+          sha256sum IGP-Technical-Maintenance-Reports-v1.4.5-Debug.apk > IGP-Technical-Maintenance-Reports-v1.4.5-Debug.apk.sha256
+
+      - name: Prepare migration update package
+        run: |
+          set -euo pipefail
+          sed -i 's/applicationId = "com.infinitygreen.maintenance.rebuild"/applicationId = "com.infinitygreen.maintenance.rebuild.migration"/' maintenance-v140/app/build.gradle.kts
+          grep -q 'applicationId = "com.infinitygreen.maintenance.rebuild.migration"' maintenance-v140/app/build.gradle.kts
+
+      - name: Build migration v1.4.5 APK
+        working-directory: maintenance-v140
+        run: gradle --no-daemon --stacktrace assembleDebug
+
+      - name: Verify and save migration APK
+        run: |
+          set -euo pipefail
+          test -f maintenance-v140/app/build/outputs/apk/debug/app-debug.apk
+          cp maintenance-v140/app/build/outputs/apk/debug/app-debug.apk IGP-Technical-Maintenance-Reports-v1.4.5-Migration.apk
+          sha256sum IGP-Technical-Maintenance-Reports-v1.4.5-Migration.apk > IGP-Technical-Maintenance-Reports-v1.4.5-Migration.apk.sha256
+          ls -lh IGP-Technical-Maintenance-Reports-v1.4.5-*.apk
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: IGP-Technical-Maintenance-Reports-v1.4.5-Code128-Scanner-Fix
+          path: |
+            IGP-Technical-Maintenance-Reports-v1.4.5-Debug.apk
+            IGP-Technical-Maintenance-Reports-v1.4.5-Debug.apk.sha256
+            IGP-Technical-Maintenance-Reports-v1.4.5-Migration.apk
+            IGP-Technical-Maintenance-Reports-v1.4.5-Migration.apk.sha256
+          if-no-files-found: error
+          retention-days: 30
