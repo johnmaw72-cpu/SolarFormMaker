@@ -1,4 +1,4 @@
-name: Build IGP Maintenance v1.4.5 Code128 Scanner Fix
+name: Build IGP Maintenance v1.4.5 Stable Scanner Fix
 
 on:
   push:
@@ -142,7 +142,39 @@ jobs:
           set -euo pipefail
           patch -p0 < ci/v145-scanner.patch
 
-      - name: Verify v1.4.5 scanner fix
+      - name: Pin signing key explicitly in Gradle
+        run: |
+          set -euo pipefail
+          test "$(git hash-object ci/igp-maint-debug.keystore)" = "e63ebf9797eaf01ca3e5d6d9842a75afa07c5383"
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('maintenance-v140/app/build.gradle.kts')
+          text = path.read_text()
+          marker = 'android {'
+          if marker not in text:
+              raise SystemExit('android block not found')
+          replacement = '''android {
+              signingConfigs {
+                  getByName("debug") {
+                      storeFile = file("../../ci/igp-maint-debug.keystore")
+                      storePassword = "android"
+                      keyAlias = "androiddebugkey"
+                      keyPassword = "android"
+                  }
+              }
+          '''
+          text = text.replace(marker, replacement, 1)
+          path.write_text(text)
+          PY
+          grep -q 'storeFile = file("../../ci/igp-maint-debug.keystore")' maintenance-v140/app/build.gradle.kts
+
+      - name: Prepare permanent stable install package
+        run: |
+          set -euo pipefail
+          sed -i 's/applicationId = "com.infinitygreen.maintenance.rebuild"/applicationId = "com.infinitygreen.maintenance.rebuild.stable"/' maintenance-v140/app/build.gradle.kts
+          grep -q 'applicationId = "com.infinitygreen.maintenance.rebuild.stable"' maintenance-v140/app/build.gradle.kts
+
+      - name: Verify v1.4.5 scanner and stable install configuration
         run: |
           set -euo pipefail
           SCANNER=maintenance-v140/app/src/main/java/com/infinitygreen/maintenance/rebuild/ui/screens/ScannerScreen.kt
@@ -154,7 +186,7 @@ jobs:
           grep -q 'isBarcodeInsideSerialScanArea' "$SCANNER"
           grep -q 'isPlausibleSerialBarcode' "$SCANNER"
           grep -q 'FORMAT_ALL_FORMATS' "$SCANNER"
-          echo 'v1.4.5 scanner fix verification passed.'
+          echo 'v1.4.5 stable install verification passed.'
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -175,48 +207,28 @@ jobs:
         with:
           gradle-version: '9.4.1'
 
-      - name: Restore stable debug signing key
-        run: |
-          mkdir -p "$HOME/.android"
-          cp ci/igp-maint-debug.keystore "$HOME/.android/debug.keystore"
-          chmod 600 "$HOME/.android/debug.keystore"
-
-      - name: Build normal v1.4.5 APK
+      - name: Build stable v1.4.5 APK
         working-directory: maintenance-v140
-        run: gradle --no-daemon --stacktrace assembleDebug
+        run: gradle --no-daemon --stacktrace clean assembleDebug
 
-      - name: Save normal APK
-        run: |
-          test -f maintenance-v140/app/build/outputs/apk/debug/app-debug.apk
-          cp maintenance-v140/app/build/outputs/apk/debug/app-debug.apk IGP-Technical-Maintenance-Reports-v1.4.5-Debug.apk
-          sha256sum IGP-Technical-Maintenance-Reports-v1.4.5-Debug.apk > IGP-Technical-Maintenance-Reports-v1.4.5-Debug.apk.sha256
-
-      - name: Prepare migration update package
+      - name: Verify and save stable APK
         run: |
           set -euo pipefail
-          sed -i 's/applicationId = "com.infinitygreen.maintenance.rebuild"/applicationId = "com.infinitygreen.maintenance.rebuild.migration"/' maintenance-v140/app/build.gradle.kts
-          grep -q 'applicationId = "com.infinitygreen.maintenance.rebuild.migration"' maintenance-v140/app/build.gradle.kts
+          APK=maintenance-v140/app/build/outputs/apk/debug/app-debug.apk
+          test -f "$APK"
+          unzip -p "$APK" AndroidManifest.xml | strings -el | grep -q 'com.infinitygreen.maintenance.rebuild.stable'
+          cp "$APK" IGP-Technical-Maintenance-Reports-v1.4.5-Stable-Install.apk
+          sha256sum IGP-Technical-Maintenance-Reports-v1.4.5-Stable-Install.apk > IGP-Technical-Maintenance-Reports-v1.4.5-Stable-Install.apk.sha256
+          keytool -list -v -keystore ci/igp-maint-debug.keystore -storepass android -alias androiddebugkey | grep 'SHA256:' > IGP-Technical-Maintenance-Reports-v1.4.5-Signing-Certificate.txt
+          ls -lh IGP-Technical-Maintenance-Reports-v1.4.5-Stable-Install.apk
 
-      - name: Build migration v1.4.5 APK
-        working-directory: maintenance-v140
-        run: gradle --no-daemon --stacktrace assembleDebug
-
-      - name: Verify and save migration APK
-        run: |
-          set -euo pipefail
-          test -f maintenance-v140/app/build/outputs/apk/debug/app-debug.apk
-          cp maintenance-v140/app/build/outputs/apk/debug/app-debug.apk IGP-Technical-Maintenance-Reports-v1.4.5-Migration.apk
-          sha256sum IGP-Technical-Maintenance-Reports-v1.4.5-Migration.apk > IGP-Technical-Maintenance-Reports-v1.4.5-Migration.apk.sha256
-          ls -lh IGP-Technical-Maintenance-Reports-v1.4.5-*.apk
-
-      - name: Upload APKs
+      - name: Upload stable APK
         uses: actions/upload-artifact@v4
         with:
-          name: IGP-Technical-Maintenance-Reports-v1.4.5-Code128-Scanner-Fix
+          name: IGP-Technical-Maintenance-Reports-v1.4.5-Stable-Install
           path: |
-            IGP-Technical-Maintenance-Reports-v1.4.5-Debug.apk
-            IGP-Technical-Maintenance-Reports-v1.4.5-Debug.apk.sha256
-            IGP-Technical-Maintenance-Reports-v1.4.5-Migration.apk
-            IGP-Technical-Maintenance-Reports-v1.4.5-Migration.apk.sha256
+            IGP-Technical-Maintenance-Reports-v1.4.5-Stable-Install.apk
+            IGP-Technical-Maintenance-Reports-v1.4.5-Stable-Install.apk.sha256
+            IGP-Technical-Maintenance-Reports-v1.4.5-Signing-Certificate.txt
           if-no-files-found: error
           retention-days: 30
