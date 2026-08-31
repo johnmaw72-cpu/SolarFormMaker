@@ -1,0 +1,149 @@
+name: Temporary RC17 Review Edit Build
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-rc17:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct exact RC16 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          workflow = Path('.github/workflows/temp-rc16-build.yml').read_text().splitlines()
+          wanted = [
+              'Reconstruct exact RC14 source',
+              'Apply verified RC15 patch',
+              'Apply RC16 keyboard and preview fixes',
+          ]
+          for step_name in wanted:
+              start = next(i for i, line in enumerate(workflow) if line.strip() == f'- name: {step_name}')
+              run_line = next(i for i in range(start + 1, len(workflow)) if workflow[i].strip() == 'run: |')
+              body = []
+              for line in workflow[run_line + 1:]:
+                  if line.startswith('      - name:') or line.startswith('      - uses:'):
+                      break
+                  if line.startswith('          '):
+                      line = line[10:]
+                  body.append(line)
+              script = '\n'.join(body).rstrip() + '\n'
+              path = Path('/tmp') / (step_name.lower().replace(' ', '_') + '.sh')
+              path.write_text(script)
+              subprocess.run(['bash', str(path)], check=True)
+          PY
+          grep -Fq 'versionCode = 50' /tmp/igp-build/IGP/app/build.gradle.kts
+          grep -Fq 'versionName = "5.0.0-rc16"' /tmp/igp-build/IGP/app/build.gradle.kts
+
+      - name: Apply RC17 direct Review and Edit workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/igp-build/IGP
+          cat build-input/rc17_patch_parts/part*.patch > /tmp/rc17.patch
+          cd "$ROOT"
+          patch -p1 < /tmp/rc17.patch
+
+          python - <<'PY'
+          from pathlib import Path
+          root = Path('/tmp/igp-build/IGP')
+          saved = root / 'app/src/main/java/com/infinitygreenpower/organizerform/feature/saved/SavedFormsScreen.kt'
+          text = saved.read_text()
+          old = 'localText("Edit","تعديل","دەستکاری")'
+          new = 'localText("Review & Edit","مراجعة وتعديل","پێداچوونەوە و دەستکاری")'
+          if old not in text:
+              raise SystemExit('Saved-form Edit label anchor was not found')
+          saved.write_text(text.replace(old, new, 1))
+
+          mirror = root / 'app/src/java/com/infinitygreenpower/organizerform'
+          pairs = [
+              ('feature/form/FormScreen.kt', 'feature/form/FormScreen.kt'),
+              ('feature/form/FormViewModel.kt', 'feature/form/FormViewModel.kt'),
+              ('feature/saved/SavedFormsScreen.kt', 'feature/saved/SavedFormsScreen.kt'),
+          ]
+          for src_rel, dst_rel in pairs:
+              src = root / 'app/src/main/java/com/infinitygreenpower/organizerform' / src_rel
+              dst = mirror / dst_rel
+              if dst.parent.exists():
+                  dst.write_text(src.read_text())
+
+          (root / 'RC17_UPDATES.md').write_text('''# IGP Organizer Form 5.0.0-rc17\n\nBuilt on RC16.\n\n- Saved completed forms now open directly in Review & Edit.\n- Client details can be edited in place.\n- System type, capacity and phase can be edited in place.\n- Inspection organizer can be changed directly.\n- Materials support add, edit, replace and remove from the review page.\n- Load note and custom notes can be edited directly.\n- Site photos can be added, included/excluded, reordered and removed directly.\n- PDF preview/save/share remain available from the same page and regenerate from current data.\n- Saving changes keeps the same form open instead of starting a blank form.\n- Version 5.0.0-rc17, versionCode 51.\n''')
+          PY
+
+          grep -Fq 'versionCode = 51' "$ROOT/app/build.gradle.kts"
+          grep -Fq 'versionName = "5.0.0-rc17"' "$ROOT/app/build.gradle.kts"
+          grep -Fq 'Review & Edit' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt"
+          grep -Fq 'clientEdit' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt"
+          grep -Fq 'systemEdit' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt"
+          grep -Fq 'notesEdit' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Prepare RC16-compatible preview signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d build-input/v5_language_fix/preview-test-keystore.b64 > /tmp/igp-preview-test.jks
+          RC16=.github/workflows/temp-rc16-build.yml
+          STORE_PASS=$(awk -F': ' '/IGP_PREVIEW_STORE_PASSWORD:/{print $2; exit}' "$RC16")
+          KEY_ALIAS=$(awk -F': ' '/IGP_PREVIEW_KEY_ALIAS:/{print $2; exit}' "$RC16")
+          KEY_PASS=$(awk -F': ' '/IGP_PREVIEW_KEY_PASSWORD:/{print $2; exit}' "$RC16")
+          test -n "$STORE_PASS" && test -n "$KEY_ALIAS" && test -n "$KEY_PASS"
+          echo "IGP_PREVIEW_KEYSTORE=/tmp/igp-preview-test.jks" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_STORE_PASSWORD=$STORE_PASS" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_PASSWORD=$KEY_PASS" >> "$GITHUB_ENV"
+
+      - name: Build RC17 APK
+        working-directory: /tmp/igp-build/IGP
+        run: gradle --no-daemon clean assembleDebug
+
+      - name: Verify and stage RC17 APK and source
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=/tmp/igp-build/IGP/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee /tmp/badging.txt
+          grep -Fq "package: name='com.infinitygreenpower.offerstudio.preview' versionCode='51' versionName='5.0.0-rc17-test'" /tmp/badging.txt
+          cp "$APK" "$GITHUB_WORKSPACE/IGP-Organizer-Form-5.0.0-rc17-Review-Edit.apk"
+          cd /tmp/igp-build
+          find IGP -type d \( -name build -o -name .gradle \) -prune -exec rm -rf {} + || true
+          zip -qr "$GITHUB_WORKSPACE/IGP-Organizer-Form-5.0.0-rc17-source.zip" IGP
+          cd "$GITHUB_WORKSPACE"
+          sha256sum IGP-Organizer-Form-5.0.0-rc17-Review-Edit.apk IGP-Organizer-Form-5.0.0-rc17-source.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IGP-Organizer-Form-5.0.0-rc17-APK-and-Source
+          path: |
+            IGP-Organizer-Form-5.0.0-rc17-Review-Edit.apk
+            IGP-Organizer-Form-5.0.0-rc17-source.zip
+          if-no-files-found: error
+          retention-days: 7

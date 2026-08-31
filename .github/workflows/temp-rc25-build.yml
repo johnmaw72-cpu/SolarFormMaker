@@ -1,0 +1,129 @@
+name: Temporary RC25 Auto Note Wording Build
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-rc25:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct exact RC24 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          lines = Path('.github/workflows/temp-rc24-build.yml').read_text().splitlines()
+          for name in ['Reconstruct exact RC23 source','Apply RC24 edit on PDF patch']:
+              start = next(i for i,l in enumerate(lines) if l.strip() == f'- name: {name}')
+              run = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == 'run: |')
+              body=[]
+              for line in lines[run+1:]:
+                  if line.startswith('      - name:') or line.startswith('      - uses:'):
+                      break
+                  body.append(line[10:] if line.startswith('          ') else line)
+              p=Path('/tmp')/(name.replace(' ','_')+'.sh')
+              p.write_text('\n'.join(body).rstrip()+'\n')
+              subprocess.run(['bash',str(p)],check=True)
+          PY
+          grep -Fq 'versionCode = 58' /tmp/igp-build/IGP/app/build.gradle.kts
+          grep -Fq 'versionName = "5.0.0-rc24"' /tmp/igp-build/IGP/app/build.gradle.kts
+
+      - name: Apply RC25 auto note wording
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/igp-build/IGP
+          cd "$ROOT"
+          python - <<'PY'
+          from pathlib import Path
+
+          models = Path('app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormModels.kt')
+          s = models.read_text()
+          old_ac = 'const val STANDARD_NOTE_AC_AR = "لا یشمل مواد واعمال AC"'
+          new_ac = 'const val STANDARD_NOTE_AC_AR = "لا تشمل مواد کیبلات وسراکت AC ولا الملحقات لها ولا اعمال تمدید الکیبلات وتحسب لاحقا حسب الذرعة"'
+          old_civil = 'const val STANDARD_NOTE_CIVIL_AR = "لا یشمل اعمال مدنیة ان وجدت"'
+          new_civil = 'const val STANDARD_NOTE_CIVIL_AR = "لا یشمل اعمال مدنیة ان وجدت"'
+          if old_ac not in s:
+              raise SystemExit('Expected RC24 Arabic AC exclusion note not found')
+          if old_civil not in s:
+              raise SystemExit('Expected RC24 Arabic civil exclusion note not found')
+          s = s.replace(old_ac, new_ac, 1).replace(old_civil, new_civil, 1)
+          models.write_text(s)
+
+          gradle = Path('app/build.gradle.kts')
+          g = gradle.read_text()
+          g = g.replace('versionCode = 58', 'versionCode = 59', 1)
+          g = g.replace('versionName = "5.0.0-rc24"', 'versionName = "5.0.0-rc25"', 1)
+          gradle.write_text(g)
+
+          Path('RC25_UPDATES.md').write_text('''# IGP Organizer Form 5.0.0-rc25\n\n- Updated the Arabic one-tap AC / civil-work exclusion preset.\n- Arabic preset now inserts exactly:\n  - لا تشمل مواد کیبلات وسراکت AC ولا الملحقات لها ولا اعمال تمدید الکیبلات وتحسب لاحقا حسب الذرعة\n  - لا یشمل اعمال مدنیة ان وجدت\n- Kurdish preset remains available when Kurdish notes language is selected.\n''')
+          PY
+          grep -Fq 'versionCode = 59' app/build.gradle.kts
+          grep -Fq 'versionName = "5.0.0-rc25"' app/build.gradle.kts
+          grep -Fq 'const val STANDARD_NOTE_AC_AR = "لا تشمل مواد کیبلات وسراکت AC ولا الملحقات لها ولا اعمال تمدید الکیبلات وتحسب لاحقا حسب الذرعة"' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormModels.kt
+          grep -Fq 'const val STANDARD_NOTE_CIVIL_AR = "لا یشمل اعمال مدنیة ان وجدت"' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormModels.kt
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Prepare compatible preview signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d build-input/v5_language_fix/preview-test-keystore.b64 > /tmp/igp-preview-test.jks
+          RC16=.github/workflows/temp-rc16-build.yml
+          echo "IGP_PREVIEW_KEYSTORE=/tmp/igp-preview-test.jks" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_STORE_PASSWORD=$(awk -F': ' '/IGP_PREVIEW_STORE_PASSWORD:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_ALIAS=$(awk -F': ' '/IGP_PREVIEW_KEY_ALIAS:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_PASSWORD=$(awk -F': ' '/IGP_PREVIEW_KEY_PASSWORD:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+
+      - name: Build RC25 APK
+        working-directory: /tmp/igp-build/IGP
+        run: gradle --no-daemon clean assembleDebug
+
+      - name: Verify and stage RC25 APK and source
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=/tmp/igp-build/IGP/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee /tmp/badging.txt
+          grep -Fq "package: name='com.infinitygreenpower.offerstudio.preview' versionCode='59' versionName='5.0.0-rc25-test'" /tmp/badging.txt
+          cp "$APK" "$GITHUB_WORKSPACE/IGP-Organizer-Form-5.0.0-rc25-Auto-Notes.apk"
+          cd /tmp/igp-build
+          find IGP -type d \( -name build -o -name .gradle \) -prune -exec rm -rf {} + || true
+          zip -qr "$GITHUB_WORKSPACE/IGP-Organizer-Form-5.0.0-rc25-source.zip" IGP
+          cd "$GITHUB_WORKSPACE"
+          sha256sum IGP-Organizer-Form-5.0.0-rc25-Auto-Notes.apk IGP-Organizer-Form-5.0.0-rc25-source.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IGP-Organizer-Form-5.0.0-rc25-APK-and-Source
+          path: |
+            IGP-Organizer-Form-5.0.0-rc25-Auto-Notes.apk
+            IGP-Organizer-Form-5.0.0-rc25-source.zip
+          if-no-files-found: error
+          retention-days: 7
