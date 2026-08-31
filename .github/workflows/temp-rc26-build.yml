@@ -1,0 +1,144 @@
+name: Temporary RC26 Guided Material Sequence Build
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-rc26:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct exact RC25 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          lines = Path('.github/workflows/temp-rc25-build.yml').read_text().splitlines()
+          for name in ['Reconstruct exact RC24 source','Apply RC25 auto note wording']:
+              start = next(i for i,l in enumerate(lines) if l.strip() == f'- name: {name}')
+              run = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == 'run: |')
+              body=[]
+              for line in lines[run+1:]:
+                  if line.startswith('      - name:') or line.startswith('      - uses:'):
+                      break
+                  body.append(line[10:] if line.startswith('          ') else line)
+              p=Path('/tmp')/(name.replace(' ','_')+'.sh')
+              p.write_text('\n'.join(body).rstrip()+'\n')
+              subprocess.run(['bash',str(p)],check=True)
+          PY
+          grep -Fq 'versionCode = 59' /tmp/igp-build/IGP/app/build.gradle.kts
+          grep -Fq 'versionName = "5.0.0-rc25"' /tmp/igp-build/IGP/app/build.gradle.kts
+
+      - name: Apply RC26 guided material sequence patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/igp-build/IGP
+          cat build-input/rc26_guided_material_sequence/part*.txt > /tmp/rc26.patch.gz.b64
+          echo '2d291474eb4e7838f573689b39821169dad60baf9eadbcff1314a55372137b67  /tmp/rc26.patch.gz.b64' | sha256sum -c -
+          base64 -d /tmp/rc26.patch.gz.b64 > /tmp/rc26.patch.gz
+          echo 'fbf3cf3502c6b5168c780c68938fae4197614caf0a4b8ff53ae06c8b708fa0c5  /tmp/rc26.patch.gz' | sha256sum -c -
+          gzip -dc /tmp/rc26.patch.gz > /tmp/rc26.patch
+          echo 'b84ce20a58a6f26b6b7f6feeb54afec89e5cfb73cdaf96c2bd975457c3cf4f6a  /tmp/rc26.patch' | sha256sum -c -
+          cd "$ROOT"
+          patch -p2 < /tmp/rc26.patch
+          cat > RC26_UPDATES.md <<'DOC'
+          # IGP Organizer Form 5.0.0-rc26
+
+          - Replaced free-form catalog browsing with an 8-step guided material sequence.
+          - Sequence: Inverter -> Solar Panel -> Battery -> Structure -> Accessories -> Earthing/Lightning -> Installation -> Delivery.
+          - Each step displays only matching catalog categories.
+          - Accessories step excludes Earthing and Lightning items.
+          - Custom Item remains available at every step and is assigned to the current material group.
+          - Existing quantity / unit-price dialog remains mandatory before adding catalog items.
+          - Inverter and Solar Panel are now mandatory before a form can be finalized; later material stages can be skipped when not applicable.
+          - Replacement browsing is restricted to the same logical material group.
+          - Added unit tests for category routing and mandatory inverter/panel validation.
+          - versionCode 60 / versionName 5.0.0-rc26.
+          DOC
+          grep -Fq 'versionCode = 60' app/build.gradle.kts
+          grep -Fq 'versionName = "5.0.0-rc26"' app/build.gradle.kts
+          grep -Fq 'enum class MaterialGuideStage' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormModels.kt
+          grep -Fq 'MaterialGuideStage.INVERTER -> listOf("Solar Inverter", "Inverters")' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormModels.kt
+          grep -Fq 'MaterialGuideStage.ACCESSORIES -> listOf("Accessories")' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormModels.kt
+          grep -Fq 'MaterialGuideStage.EARTHING_LIGHTNING -> listOf("Earthing System", "Lightning System")' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormModels.kt
+          grep -Fq 'Guided Material Builder' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+          grep -Fq 'Custom Item' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+          grep -Fq 'add("inverter")' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormModels.kt
+          grep -Fq 'add("solar_panel")' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormModels.kt
+          test -s app/src/test/java/com/infinitygreenpower/organizerform/feature/form/MaterialGuideTest.kt
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Generate complete Gradle wrapper for Android Studio source
+        working-directory: /tmp/igp-build/IGP
+        run: gradle wrapper --gradle-version 9.4.1
+
+      - name: Prepare compatible preview signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d build-input/v5_language_fix/preview-test-keystore.b64 > /tmp/igp-preview-test.jks
+          RC16=.github/workflows/temp-rc16-build.yml
+          echo "IGP_PREVIEW_KEYSTORE=/tmp/igp-preview-test.jks" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_STORE_PASSWORD=$(awk -F': ' '/IGP_PREVIEW_STORE_PASSWORD:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_ALIAS=$(awk -F': ' '/IGP_PREVIEW_KEY_ALIAS:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_PASSWORD=$(awk -F': ' '/IGP_PREVIEW_KEY_PASSWORD:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+
+      - name: Run RC26 unit tests
+        working-directory: /tmp/igp-build/IGP
+        run: gradle --no-daemon testDebugUnitTest
+
+      - name: Build RC26 APK
+        working-directory: /tmp/igp-build/IGP
+        run: gradle --no-daemon clean assembleDebug
+
+      - name: Verify and stage RC26 APK and source
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=/tmp/igp-build/IGP/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee /tmp/badging.txt
+          grep -Fq "package: name='com.infinitygreenpower.offerstudio.preview' versionCode='60' versionName='5.0.0-rc26-test'" /tmp/badging.txt
+          test -s /tmp/igp-build/IGP/gradlew
+          test -s /tmp/igp-build/IGP/gradlew.bat
+          test -s /tmp/igp-build/IGP/gradle/wrapper/gradle-wrapper.jar
+          cp "$APK" "$GITHUB_WORKSPACE/IGP-Organizer-Form-5.0.0-rc26-Guided-Materials.apk"
+          cd /tmp/igp-build
+          find IGP -type d \( -name build -o -name .gradle -o -name .kotlin \) -prune -exec rm -rf {} + || true
+          zip -qr "$GITHUB_WORKSPACE/IGP-Organizer-Form-5.0.0-rc26-source.zip" IGP
+          cd "$GITHUB_WORKSPACE"
+          sha256sum IGP-Organizer-Form-5.0.0-rc26-Guided-Materials.apk IGP-Organizer-Form-5.0.0-rc26-source.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IGP-Organizer-Form-5.0.0-rc26-APK-and-Source
+          path: |
+            IGP-Organizer-Form-5.0.0-rc26-Guided-Materials.apk
+            IGP-Organizer-Form-5.0.0-rc26-source.zip
+          if-no-files-found: error
+          retention-days: 7
