@@ -45,7 +45,6 @@ jobs:
           set -euo pipefail
           ROOT=/tmp/igp-build/IGP
           cat build-input/rc28_controlled_inputs/part*.txt > /tmp/rc28.patch.gz.b64
-          echo 'bb0571b723ff9b28c809551073b808b178588d4a7e79ca2bcd1c0db60e9d5d61  /tmp/rc28.patch.gz.b64' | sha256sum -c -
           base64 -d /tmp/rc28.patch.gz.b64 > /tmp/rc28.patch.gz
           echo '2e35072cd5e4c9c766be58d49068fdeff4bb70cc7610f2f3323e4531e2699cae  /tmp/rc28.patch.gz' | sha256sum -c -
           gzip -dc /tmp/rc28.patch.gz > /tmp/rc28.patch
