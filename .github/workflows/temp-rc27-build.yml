@@ -51,6 +51,7 @@ jobs:
           echo '412b3348f1bd39b4b82c30fbebdfe87057ff7c3483378718220f3fb4b62c9073  /tmp/rc27.patch' | sha256sum -c -
           cd "$ROOT"
           patch -p1 < /tmp/rc27.patch
+          sed -i 's/baselineFromTop = top + textLayout.getLineBaseline(lineIndex),/baselineFromTop = (top + textLayout.getLineBaseline(lineIndex)).toFloat(),/' app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt
           grep -Fq 'versionCode = 61' app/build.gradle.kts
           grep -Fq 'versionName = "5.0.0-rc27"' app/build.gradle.kts
           grep -Fq 'pdfbox-android:2.0.27.0' app/build.gradle.kts
