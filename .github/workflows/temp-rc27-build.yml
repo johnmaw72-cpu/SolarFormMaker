@@ -1,0 +1,122 @@
+name: Temporary RC27 Unicode Notes from RC25 Build
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-rc27:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct exact RC25 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          lines = Path('.github/workflows/temp-rc25-build.yml').read_text().splitlines()
+          for name in ['Reconstruct exact RC24 source','Apply RC25 auto note wording']:
+              start = next(i for i,l in enumerate(lines) if l.strip() == f'- name: {name}')
+              run = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == 'run: |')
+              body=[]
+              for line in lines[run+1:]:
+                  if line.startswith('      - name:') or line.startswith('      - uses:'):
+                      break
+                  body.append(line[10:] if line.startswith('          ') else line)
+              p=Path('/tmp')/(name.replace(' ','_')+'.sh')
+              p.write_text('\n'.join(body).rstrip()+'\n')
+              subprocess.run(['bash',str(p)],check=True)
+          PY
+          grep -Fq 'versionCode = 59' /tmp/igp-build/IGP/app/build.gradle.kts
+          grep -Fq 'versionName = "5.0.0-rc25"' /tmp/igp-build/IGP/app/build.gradle.kts
+          ! grep -Fq 'Guided Add Items' /tmp/igp-build/IGP/app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+
+      - name: Apply RC27 logical Unicode notes patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/igp-build/IGP
+          cat build-input/rc27_unicode_notes/part*.txt > /tmp/rc27.patch.gz.b64
+          echo 'a93917a703607fedbc365bd536a10750604a3859f89eecb9d56941f4c9689f64  /tmp/rc27.patch.gz.b64' | sha256sum -c -
+          base64 -d /tmp/rc27.patch.gz.b64 > /tmp/rc27.patch.gz
+          echo '882d8f3842fc9a8f5ef31c5525a09f924b9c8031cb9570491b38fddbb1b8f010  /tmp/rc27.patch.gz' | sha256sum -c -
+          gzip -dc /tmp/rc27.patch.gz > /tmp/rc27.patch
+          echo '412b3348f1bd39b4b82c30fbebdfe87057ff7c3483378718220f3fb4b62c9073  /tmp/rc27.patch' | sha256sum -c -
+          cd "$ROOT"
+          patch -p1 < /tmp/rc27.patch
+          grep -Fq 'versionCode = 61' app/build.gradle.kts
+          grep -Fq 'versionName = "5.0.0-rc27"' app/build.gradle.kts
+          grep -Fq 'pdfbox-android:2.0.27.0' app/build.gradle.kts
+          grep -Fq 'UnicodeNoteTextLayer.apply' app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt
+          grep -Fq 'RenderingMode.NEITHER' app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt
+          ! grep -Fq 'Guided Add Items' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Generate complete Gradle wrapper for Android Studio source
+        working-directory: /tmp/igp-build/IGP
+        run: gradle wrapper --gradle-version 9.4.1
+
+      - name: Prepare compatible preview signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d build-input/v5_language_fix/preview-test-keystore.b64 > /tmp/igp-preview-test.jks
+          RC16=.github/workflows/temp-rc16-build.yml
+          echo "IGP_PREVIEW_KEYSTORE=/tmp/igp-preview-test.jks" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_STORE_PASSWORD=$(awk -F': ' '/IGP_PREVIEW_STORE_PASSWORD:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_ALIAS=$(awk -F': ' '/IGP_PREVIEW_KEY_ALIAS:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_PASSWORD=$(awk -F': ' '/IGP_PREVIEW_KEY_PASSWORD:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+
+      - name: Build RC27 APK
+        working-directory: /tmp/igp-build/IGP
+        run: ./gradlew --no-daemon clean assembleDebug
+
+      - name: Verify and stage RC27 APK and source
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/igp-build/IGP
+          APK="$ROOT/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee /tmp/badging.txt
+          grep -Fq "package: name='com.infinitygreenpower.offerstudio.preview' versionCode='61' versionName='5.0.0-rc27-test'" /tmp/badging.txt
+          test -s "$ROOT/gradle/wrapper/gradle-wrapper.jar"
+          grep -Fq 'gradle-9.4.1-bin.zip' "$ROOT/gradle/wrapper/gradle-wrapper.properties"
+          cp "$APK" "$GITHUB_WORKSPACE/IGP-Organizer-Form-5.0.0-rc27-RC25-Unicode-Notes.apk"
+          cd /tmp/igp-build
+          find IGP -type d \( -name build -o -name .gradle \) -prune -exec rm -rf {} + || true
+          zip -qr "$GITHUB_WORKSPACE/IGP-Organizer-Form-5.0.0-rc27-source.zip" IGP
+          cd "$GITHUB_WORKSPACE"
+          sha256sum IGP-Organizer-Form-5.0.0-rc27-RC25-Unicode-Notes.apk IGP-Organizer-Form-5.0.0-rc27-source.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IGP-Organizer-Form-5.0.0-rc27-RC25-Unicode-Notes-APK-and-Source
+          path: |
+            IGP-Organizer-Form-5.0.0-rc27-RC25-Unicode-Notes.apk
+            IGP-Organizer-Form-5.0.0-rc27-source.zip
+          if-no-files-found: error
+          retention-days: 7
