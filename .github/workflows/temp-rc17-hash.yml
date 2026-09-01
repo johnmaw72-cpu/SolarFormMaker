@@ -1,0 +1,24 @@
+name: Temporary RC17 Override Hash Check
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  hash-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check override chunks
+        shell: bash
+        run: |
+          set -euo pipefail
+          wc -c build-input/rc17_overrides_b64/part*.txt
+          sha256sum build-input/rc17_overrides_b64/part*.txt
+          cat build-input/rc17_overrides_b64/part*.txt > /tmp/rc17-overrides.tar.gz.b64
+          base64 -d /tmp/rc17-overrides.tar.gz.b64 > /tmp/rc17-overrides.tar.gz
+          sha256sum /tmp/rc17-overrides.tar.gz.b64 /tmp/rc17-overrides.tar.gz
+          tar -tzf /tmp/rc17-overrides.tar.gz
