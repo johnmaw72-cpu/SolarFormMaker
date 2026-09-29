@@ -1,0 +1,119 @@
+name: RC30 Selectable RTL Notes
+
+on:
+  push:
+    branches: [chatgpt-rc30-selectable-notes-20260929]
+
+permissions:
+  contents: read
+
+jobs:
+  build-rc30:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct exact RC29 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          lines = Path('.github/workflows/temp-rc29-build.yml').read_text().splitlines()
+          for name in ['Reconstruct exact RC27 source','Apply RC28 controlled inputs patch','Apply RC29 prepared form fix']:
+              start = next(i for i,l in enumerate(lines) if l.strip() == f'- name: {name}')
+              run = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == 'run: |')
+              body=[]
+              for line in lines[run+1:]:
+                  if line.startswith('      - name:') or line.startswith('      - uses:'):
+                      break
+                  body.append(line[10:] if line.startswith('          ') else line)
+              p=Path('/tmp')/(name.replace(' ','_')+'.sh')
+              p.write_text('\n'.join(body).rstrip()+'\n')
+              subprocess.run(['bash',str(p)],check=True)
+          PY
+          grep -Fq 'versionCode = 63' /tmp/igp-build/IGP/app/build.gradle.kts
+          grep -Fq 'versionName = "5.0.0-rc29"' /tmp/igp-build/IGP/app/build.gradle.kts
+
+      - name: Apply RC30 selectable notes patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/igp-build/IGP
+          cat build-input/rc30_selectable_notes/part*.txt > /tmp/rc30.patch.gz.b64
+          echo 'd689b242e1a5923d5182ae7bea9df1a2f9c7978f08e6fb68a297506064846c8d  /tmp/rc30.patch.gz.b64' | sha256sum -c -
+          base64 -d /tmp/rc30.patch.gz.b64 > /tmp/rc30.patch.gz
+          echo '9cbcea12d6bdf0fcfc38f4c8037fce8d5cddcb9fa059fbcc9b707d8ea3571ba4  /tmp/rc30.patch.gz' | sha256sum -c -
+          gzip -dc /tmp/rc30.patch.gz > /tmp/rc30.patch
+          echo 'ea298c84ab33f04d1d07d0be05cbb4eb520e1ab027b691287baabb314444d088  /tmp/rc30.patch' | sha256sum -c -
+          cd "$ROOT"
+          git apply /tmp/rc30.patch
+          grep -Fq 'versionCode = 64' app/build.gradle.kts
+          grep -Fq 'versionName = "5.0.0-rc30"' app/build.gradle.kts
+          grep -Fq 'COSName.ACTUAL_TEXT' app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt
+          grep -Fq 'writeReordered' app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt
+          grep -Fq 'width = textLayout.getLineWidth' app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt
+          grep -Fq 'state.nightAmps.isNotBlank() && state.nightHours.isNotBlank()' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormModels.kt
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Generate complete Gradle wrapper
+        working-directory: /tmp/igp-build/IGP
+        run: gradle wrapper --gradle-version 9.4.1
+
+      - name: Prepare compatible preview signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d build-input/v5_language_fix/preview-test-keystore.b64 > /tmp/igp-preview-test.jks
+          RC16=.github/workflows/temp-rc16-build.yml
+          echo "IGP_PREVIEW_KEYSTORE=/tmp/igp-preview-test.jks" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_STORE_PASSWORD=$(awk -F': ' '/IGP_PREVIEW_STORE_PASSWORD:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_ALIAS=$(awk -F': ' '/IGP_PREVIEW_KEY_ALIAS:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_PASSWORD=$(awk -F': ' '/IGP_PREVIEW_KEY_PASSWORD:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+
+      - name: Build RC30 APK
+        working-directory: /tmp/igp-build/IGP
+        run: ./gradlew --no-daemon clean assembleDebug
+
+      - name: Verify and stage RC30 APK and source
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/igp-build/IGP
+          APK="$ROOT/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee /tmp/badging.txt
+          grep -Fq "package: name='com.infinitygreenpower.offerstudio.preview' versionCode='64' versionName='5.0.0-rc30-test'" /tmp/badging.txt
+          test -s "$ROOT/gradle/wrapper/gradle-wrapper.jar"
+          grep -Fq 'gradle-9.4.1-bin.zip' "$ROOT/gradle/wrapper/gradle-wrapper.properties"
+          cp "$APK" "$GITHUB_WORKSPACE/IGP-Organizer-Form-5.0.0-rc30-Selectable-RTL-Notes.apk"
+          cd /tmp/igp-build
+          find IGP -type d \( -name build -o -name .gradle \) -prune -exec rm -rf {} + || true
+          zip -qr "$GITHUB_WORKSPACE/IGP-Organizer-Form-5.0.0-rc30-source.zip" IGP
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IGP-Organizer-Form-5.0.0-rc30-Selectable-RTL-Notes-APK-and-Source
+          path: |
+            IGP-Organizer-Form-5.0.0-rc30-Selectable-RTL-Notes.apk
+            IGP-Organizer-Form-5.0.0-rc30-source.zip
+          if-no-files-found: error
+          retention-days: 7
