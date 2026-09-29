@@ -47,6 +47,8 @@ jobs:
           gzip -dc /tmp/rc30.patch.gz > /tmp/rc30.patch
           cd "$ROOT"
           git apply /tmp/rc30.patch
+          sed -i 's/COSName.SPAN/COSName.getPDFName("Span")/' app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt
+          sed -i 's/Bidi.DO_MIRRORING or Bidi.REMOVE_BIDI_CONTROLS/Bidi.DO_MIRRORING + Bidi.REMOVE_BIDI_CONTROLS/' app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt
           grep -Fq 'versionCode = 64' app/build.gradle.kts
           grep -Fq 'versionName = "5.0.0-rc30"' app/build.gradle.kts
           grep -Fq 'COSName.ACTUAL_TEXT' app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt
