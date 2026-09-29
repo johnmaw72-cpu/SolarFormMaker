@@ -43,7 +43,6 @@ jobs:
           set -euo pipefail
           ROOT=/tmp/igp-build/IGP
           cat build-input/rc30_selectable_notes/part*.txt > /tmp/rc30.patch.gz.b64
-          echo 'd689b242e1a5923d5182ae7bea9df1a2f9c7978f08e6fb68a297506064846c8d  /tmp/rc30.patch.gz.b64' | sha256sum -c -
           base64 -d /tmp/rc30.patch.gz.b64 > /tmp/rc30.patch.gz
           echo '9cbcea12d6bdf0fcfc38f4c8037fce8d5cddcb9fa059fbcc9b707d8ea3571ba4  /tmp/rc30.patch.gz' | sha256sum -c -
           gzip -dc /tmp/rc30.patch.gz > /tmp/rc30.patch
