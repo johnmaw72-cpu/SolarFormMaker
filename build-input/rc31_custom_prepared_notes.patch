@@ -1,0 +1,83 @@
+--- app/build.gradle.kts	2026-09-29 14:32:48.000000000 +0000
++++ app/build.gradle.kts	2026-09-29 17:52:04.695924935 +0000
+@@ -32,8 +32,8 @@
+         applicationId = "com.infinitygreenpower.offerstudio"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 64
+-        versionName = "5.0.0-rc30"
++        versionCode = 65
++        versionName = "5.0.0-rc31"
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+         vectorDrawables.useSupportLibrary = true
+     }
+--- app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt	2026-09-29 14:32:48.000000000 +0000
++++ app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt	2026-09-29 17:52:04.696393227 +0000
+@@ -1371,7 +1371,30 @@
+                 MiniField(emergencyDuration, { emergencyDuration = it }, tr(lang, "Duration", "المدة", "ماوە"), Modifier.weight(1f), KeyboardType.Text)
+             }
+         }
+-        OutlinedButton({ note = addStandardExclusionNotes(note, noteLanguage) }, Modifier.fillMaxWidth()) { Text(tr(lang, "Add AC & civil-work exclusions", "إضافة ملاحظات AC والأعمال المدنية", "زیادکردنی تێبینی AC و کاری مەدەنی")) }
++        Spacer(Modifier.height(8.dp))
++        Text(tr(lang, "Prepared note", "ملاحظة جاهزة", "تێبینی ئامادەکراو"), fontWeight = FontWeight.SemiBold, color = Navy)
++        Text(
++            tr(lang, "Add the prepared AC & civil-work exclusions note.", "أضف الملاحظة الجاهزة الخاصة بـ AC والأعمال المدنية.", "تێبینی ئامادەکراوی AC و کاری مەدەنی زیاد بکە."),
++            color = Muted,
++            fontSize = 11.sp,
++            modifier = Modifier.padding(bottom = 4.dp)
++        )
++        OutlinedButton({ note = addStandardExclusionNotes(note, noteLanguage) }, Modifier.fillMaxWidth()) {
++            Icon(Icons.Outlined.Add, null)
++            Spacer(Modifier.width(6.dp))
++            Text(tr(lang, "Add prepared note", "إضافة الملاحظة الجاهزة", "زیادکردنی تێبینی ئامادەکراو"))
++        }
++        Spacer(Modifier.height(10.dp))
++        Text(tr(lang, "Custom note", "ملاحظة مخصصة", "تێبینی تایبەت"), fontWeight = FontWeight.SemiBold, color = Navy)
++        OutlinedTextField(
++            value = note,
++            onValueChange = { note = it },
++            modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
++            placeholder = { Text(tr(lang, "Write an additional note…", "اكتب ملاحظة إضافية…", "تێبینییەکی زیادە بنووسە…")) },
++            minLines = 4,
++            maxLines = 8,
++            singleLine = false
++        )
+         PrimaryButton(tr(lang, "Apply to PDF", "تطبيق على PDF", "لە PDF جێبەجێ بکە"), {
+             vm.update { copy(includeLoadNote = include, dayFrom = dayFrom, dayTo = dayTo, nightAmps = nightAmps, nightHours = nightHours, emergencyAmps = emergencyAmps, emergencyDuration = emergencyDuration, customNote = note, noteLanguage = noteLanguage) }
+             onClose()
+@@ -1594,10 +1617,22 @@
+                     MiniField(emergencyDuration,{emergencyDuration=it},tr(lang,"Duration","المدة","ماوە"),Modifier.weight(1f),KeyboardType.Text)
+                 }
+             }
++            Text(tr(lang,"Prepared note","ملاحظة جاهزة","تێبینی ئامادەکراو"),fontWeight=FontWeight.SemiBold,color=Navy)
+             OutlinedButton({note=addStandardExclusionNotes(note, noteLanguage)},Modifier.fillMaxWidth()) {
+                 Icon(Icons.Outlined.Add,null)
+-                Text(tr(lang,"Add AC & civil-work exclusions","إضافة ملاحظات AC والأعمال المدنية","زیادکردنی تێبینی AC و کاری مەدەنی"))
++                Spacer(Modifier.width(6.dp))
++                Text(tr(lang,"Add prepared note","إضافة الملاحظة الجاهزة","زیادکردنی تێبینی ئامادەکراو"))
+             }
++            Text(tr(lang,"Custom note","ملاحظة مخصصة","تێبینی تایبەت"),fontWeight=FontWeight.SemiBold,color=Navy,modifier=Modifier.padding(top=4.dp))
++            OutlinedTextField(
++                value=note,
++                onValueChange={note=it},
++                modifier=Modifier.fillMaxWidth().heightIn(min=120.dp),
++                placeholder={Text(tr(lang,"Write an additional note…","اكتب ملاحظة إضافية…","تێبینییەکی زیادە بنووسە…"))},
++                minLines=4,
++                maxLines=8,
++                singleLine=false
++            )
+             PrimaryButton(
+                 tr(lang,"Save Notes Changes","حفظ الملاحظات","گۆڕانکاری تێبینی پاشەکەوت بکە"),
+                 { onSave(include, dayFrom, dayTo, nightAmps, nightHours, emergencyAmps, emergencyDuration, note, noteLanguage) },
+--- /dev/null	2026-09-29 17:50:24.814529133 +0000
++++ RC31_UPDATES.md	2026-09-29 17:52:04.696084774 +0000
+@@ -0,0 +1,9 @@
++# RC31 — Prepared + Custom Notes
++
++- Based on RC30.
++- Restores a multiline Custom note field in the PDF notes editor.
++- Keeps the prepared AC/civil-work exclusions as a separate one-tap Prepared note action.
++- Applies the same notes controls in the Review/Edit notes sheet.
++- Custom Item remains disabled; materials still come from the catalog.
++- Keeps RC30 selectable Arabic/Kurdish PDF text-layer improvements.
++- versionCode 65 / versionName 5.0.0-rc31.
