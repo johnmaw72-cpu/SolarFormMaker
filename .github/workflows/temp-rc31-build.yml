@@ -44,7 +44,7 @@ jobs:
           set -euo pipefail
           ROOT=/tmp/igp-build/IGP
           cd "$ROOT"
-          git apply "$GITHUB_WORKSPACE/build-input/rc31_custom_prepared_notes.patch"
+          git apply -p0 "$GITHUB_WORKSPACE/build-input/rc31_custom_prepared_notes.patch"
           grep -Fq 'versionCode = 65' app/build.gradle.kts
           grep -Fq 'versionName = "5.0.0-rc31"' app/build.gradle.kts
           grep -Fq 'Text(tr(lang, "Custom note"' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
