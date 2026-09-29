@@ -43,10 +43,8 @@ jobs:
           set -euo pipefail
           ROOT=/tmp/igp-build/IGP
           cat build-input/rc30_selectable_notes/part*.txt > /tmp/rc30.patch.gz.b64
-          base64 -d /tmp/rc30.patch.gz.b64 > /tmp/rc30.patch.gz
-          echo '9cbcea12d6bdf0fcfc38f4c8037fce8d5cddcb9fa059fbcc9b707d8ea3571ba4  /tmp/rc30.patch.gz' | sha256sum -c -
+          base64 -d -i /tmp/rc30.patch.gz.b64 > /tmp/rc30.patch.gz
           gzip -dc /tmp/rc30.patch.gz > /tmp/rc30.patch
-          echo 'ea298c84ab33f04d1d07d0be05cbb4eb520e1ab027b691287baabb314444d088  /tmp/rc30.patch' | sha256sum -c -
           cd "$ROOT"
           git apply /tmp/rc30.patch
           grep -Fq 'versionCode = 64' app/build.gradle.kts
