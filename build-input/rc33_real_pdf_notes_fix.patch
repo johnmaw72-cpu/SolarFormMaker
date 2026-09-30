@@ -1,0 +1,54 @@
+--- app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt	2026-09-30 12:15:28.773141368 +0000
++++ app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt	2026-09-30 12:27:43.541456513 +0000
+@@ -47,9 +47,9 @@
+         val rawPdf = File(file.parentFile, file.name + ".canvas")
+         val noteTextLayers = mutableListOf<UnicodeNoteTextLayer.Line>()
+         try {
+-            // RC33: reserve the Notes geometry in the Android PDF but do not rasterize it.
+-            // The visible note text is appended afterwards as genuine Unicode PDF text.
+-            renderCanvasPdf(rawPdf, s, settings, resolvedLang, noteTextLayers, rasterizeNotes = false)
++            // RC33: keep Android's proven RTL bitmap as the visual appearance, then add a genuine
++            // FILL-mode PDF text layer underneath it for machine extraction/import.
++            renderCanvasPdf(rawPdf, s, settings, resolvedLang, noteTextLayers, rasterizeNotes = true)
+ 
+             val textPdfCreated = runCatching {
+                 UnicodeNoteTextLayer.apply(context, rawPdf, file, noteTextLayers)
+--- app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt	2026-09-30 12:15:28.773459395 +0000
++++ app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt	2026-09-30 12:27:20.185469964 +0000
+@@ -1,8 +1,6 @@
+ package com.infinitygreenpower.organizerform.export.pdf
+ 
+ import android.content.Context
+-import android.icu.text.ArabicShaping
+-import android.icu.text.Bidi
+ import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+ import com.tom_roush.pdfbox.cos.COSDictionary
+ import com.tom_roush.pdfbox.cos.COSName
+@@ -56,7 +54,7 @@
+                 PDPageContentStream(
+                     document,
+                     page,
+-                    PDPageContentStream.AppendMode.APPEND,
++                    PDPageContentStream.AppendMode.PREPEND,
+                     true,
+                     true
+                 ).use { content ->
+@@ -108,14 +106,10 @@
+         .replace("\u2069", "")
+ 
+     private fun renderText(logical: String, rtl: Boolean): String {
+-        if (!rtl) return logical
+-        val shaped = runCatching {
+-            ArabicShaping(ArabicShaping.LETTERS_SHAPE).shape(logical)
+-        }.getOrDefault(logical)
+-        return runCatching {
+-            Bidi(shaped, Bidi.DIRECTION_RIGHT_TO_LEFT)
+-                .writeReordered(Bidi.DO_MIRRORING + Bidi.REMOVE_BIDI_CONTROLS)
+-        }.getOrDefault(shaped)
++        // Keep the PDF text stream in logical Unicode order. The Android-rendered RTL
++        // bitmap above it supplies the exact visual shaping, while this FILL-mode text
++        // remains a genuine PDF text object for search, selection and PC import.
++        return logical
+     }
+ 
+     /**
