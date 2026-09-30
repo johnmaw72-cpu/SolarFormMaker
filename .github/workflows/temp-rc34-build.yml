@@ -149,7 +149,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base64 -d "$GITHUB_WORKSPACE/build-input/v5_language_fix/preview-test-keystore.b64" > /tmp/igp-preview-test.jks
+          curl -fsSL "https://raw.githubusercontent.com/johnmaw72-cpu/SolarFormMaker/chatgpt-v5-pdf-fix-build/build-input/v5_language_fix/preview-test-keystore.b64" | base64 -d > /tmp/igp-preview-test.jks
           RC16="$GITHUB_WORKSPACE/.github/workflows/temp-rc16-build.yml"
           echo "IGP_PREVIEW_KEYSTORE=/tmp/igp-preview-test.jks" >> "$GITHUB_ENV"
           echo "IGP_PREVIEW_STORE_PASSWORD=$(awk -F': ' '/IGP_PREVIEW_STORE_PASSWORD:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
