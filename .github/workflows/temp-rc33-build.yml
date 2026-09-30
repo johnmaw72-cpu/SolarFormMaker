@@ -42,10 +42,14 @@ jobs:
           echo '049b00ffc2fabb4051a85b4b1abbdbaecd7127f359115c5bb976da92caba12cc  /tmp/rc33.patch' | sha256sum -c -
           cd "$ROOT"
           git apply /tmp/rc33.patch
+          git apply "$GITHUB_WORKSPACE/build-input/rc33_real_pdf_notes_fix.patch"
           cat > RC33_UPDATES.md <<'EOF'
-          # RC33 — Real PDF Notes Text
-          Notes are emitted as visible PDF text objects with RTL shaping and ActualText.
+          # RC33 — PC-detectable PDF Notes
+          Notes keep the proven Android RTL visual rendering and now also contain genuine
+          FILL-mode Unicode PDF text objects underneath, with /ActualText for extraction/import.
           EOF
+          ! grep -Fq 'ArabicShaping' app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt
+          grep -Fq 'AppendMode.PREPEND' app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt
           grep -Fq 'versionCode = 67' app/build.gradle.kts
           grep -Fq 'versionName = "5.0.0-rc33"' app/build.gradle.kts
       - uses: actions/setup-java@v4
