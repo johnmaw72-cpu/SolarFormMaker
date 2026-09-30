@@ -1,0 +1,283 @@
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -32,8 +32,8 @@
+         applicationId = "com.infinitygreenpower.offerstudio"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 67
+-        versionName = "5.0.0-rc33"
++        versionCode = 68
++        versionName = "5.0.0-rc34"
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+         vectorDrawables.useSupportLibrary = true
+     }
+--- a/app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt
++++ b/app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt
+@@ -47,21 +47,11 @@
+         val rawPdf = File(file.parentFile, file.name + ".canvas")
+         val noteTextLayers = mutableListOf<UnicodeNoteTextLayer.Line>()
+         try {
+-            // RC33: keep Android's proven RTL bitmap as the visual appearance, then add a genuine
+-            // FILL-mode PDF text layer underneath it for machine extraction/import.
+-            renderCanvasPdf(rawPdf, s, settings, resolvedLang, noteTextLayers, rasterizeNotes = true)
+-
+-            val textPdfCreated = runCatching {
+-                UnicodeNoteTextLayer.apply(context, rawPdf, file, noteTextLayers)
+-            }.isSuccess
+-
+-            if (!textPdfCreated) {
+-                // Safety fallback only: if a vendor device exposes no embeddable Arabic font,
+-                // keep the form usable by rebuilding the Notes with the legacy bitmap path.
+-                // Normal RC33 exports use real PDF text and never reach this branch.
+-                noteTextLayers.clear()
+-                renderCanvasPdf(file, s, settings, resolvedLang, noteTextLayers, rasterizeNotes = true)
+-            }
++            // RC34: Notes are drawn directly onto Android's PDF Canvas as text. They are never
++            // converted to a bitmap. A bundled Unicode font is then used to append /ActualText
++            // semantics so Arabic/Sorani copy, search and PC import remain device-independent.
++            renderCanvasPdf(rawPdf, s, settings, resolvedLang, noteTextLayers)
++            UnicodeNoteTextLayer.apply(context, rawPdf, file, noteTextLayers)
+         } finally {
+             rawPdf.delete()
+         }
+@@ -72,12 +62,11 @@
+         s: FormUiState,
+         settings: Settings,
+         resolvedLang: String,
+-        noteTextLayers: MutableList<UnicodeNoteTextLayer.Line>,
+-        rasterizeNotes: Boolean
++        noteTextLayers: MutableList<UnicodeNoteTextLayer.Line>
+     ) {
+         val pdf = PdfDocument()
+         try {
+-            val writer = Writer(pdf, settings, resolvedLang, noteTextLayers, rasterizeNotes)
++            val writer = Writer(pdf, settings, resolvedLang, noteTextLayers)
+             writer.newPage(fullHeader = true)
+ 
+             writer.section(t(resolvedLang, "Client Details", "بيانات العميل", "زانیاری کڕیار"))
+@@ -123,8 +112,7 @@
+         private val doc: PdfDocument,
+         private val settings: Settings,
+         private val lang: String,
+-        private val noteTextLayers: MutableList<UnicodeNoteTextLayer.Line>,
+-        private val rasterizeNotes: Boolean
++        private val noteTextLayers: MutableList<UnicodeNoteTextLayer.Line>
+     ) {
+         private val pageWidth = 595
+         private val pageHeight = 842
+@@ -538,33 +526,14 @@
+ 
+         private fun recordNoteParagraph(textLayout: StaticLayout, logicalText: String) {
+             val top = y
+-            if (rasterizeNotes) {
+-                val scale = 3
+-                val bitmap = Bitmap.createBitmap(
+-                    (contentWidth * scale).coerceAtLeast(1),
+-                    (textLayout.height * scale).coerceAtLeast(1),
+-                    Bitmap.Config.ARGB_8888
+-                )
+-                val bitmapCanvas = Canvas(bitmap)
+-                bitmapCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
+-                bitmapCanvas.save()
+-                bitmapCanvas.scale(scale.toFloat(), scale.toFloat())
+-                textLayout.draw(bitmapCanvas)
+-                bitmapCanvas.restore()
+-
+-                canvas!!.drawBitmap(
+-                    bitmap,
+-                    null,
+-                    RectF(
+-                        left.toFloat(),
+-                        top.toFloat(),
+-                        right.toFloat(),
+-                        (top + textLayout.height).toFloat()
+-                    ),
+-                    paint
+-                )
+-                bitmap.recycle()
+-            }
++
++            // RC34: draw the visible Notes with StaticLayout directly on the PDF Canvas.
++            // This keeps Android's correct Arabic/Sorani shaping/BiDi while producing PDF text
++            // drawing operations instead of embedding a rasterized Notes image.
++            canvas!!.save()
++            canvas!!.translate(left.toFloat(), top.toFloat())
++            textLayout.draw(canvas!!)
++            canvas!!.restore()
+ 
+             for (lineIndex in 0 until textLayout.lineCount) {
+                 val start = textLayout.getLineStart(lineIndex)
+--- a/app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt
++++ b/app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt
+@@ -14,14 +14,21 @@
+ import java.io.FileOutputStream
+ 
+ /**
+- * Writes Load / Notes as genuine visible PDF text.
++ * Adds machine-readable Unicode semantics to the visible Notes text produced by PdfDocument.
+  *
+- * Android StaticLayout is still used only to calculate wrapping, line positions and RTL
+- * geometry. RC33 does not rasterize the normal Notes path. PDFBox appends each line with an
+- * embedded Unicode font, Arabic shaping/BiDi visual order for correct display, and /ActualText
+- * carrying the original logical Unicode so search/copy/import tools can recover normal text.
++ * RC34 deliberately separates the two responsibilities:
++ * 1. Android StaticLayout draws the visible Arabic/Sorani Notes directly as PDF text operations,
++ *    preserving the device's correct shaping and BiDi behavior without any bitmap conversion.
++ * 2. PDFBox appends an invisible Type-0 Unicode text object for each visible line and tags it with
++ *    /ActualText containing the original logical Unicode. This makes selection/search/copy and
++ *    desktop import deterministic even when a vendor PDF font encodes shaped glyphs unusually.
++ *
++ * The Unicode font is bundled with the app, so export no longer depends on vendor /system/fonts
++ * and there is no bitmap fallback.
+  */
+ object UnicodeNoteTextLayer {
++    private const val BUNDLED_FONT_ASSET = "fonts/Amiri-Regular.ttf"
++
+     data class Line(
+         val pageNumber: Int,
+         val x: Float,
+@@ -40,30 +47,30 @@
+ 
+         PDFBoxResourceLoader.init(context.applicationContext)
+         PDDocument.load(input).use { document ->
+-            val renderSamples = lines.mapNotNull { line ->
+-                val logical = sanitize(line.text)
+-                if (logical.isBlank()) null else renderText(logical, line.rtl)
+-            }
+-            val font = loadUsableUnicodeFont(document, renderSamples)
+-                ?: throw IllegalStateException("No compatible Arabic/Sorani Unicode font is available for real PDF note text")
++            val font = loadBundledUnicodeFont(context, document)
++
++            // Fail the export immediately if any note character cannot be represented. RC34 must
++            // never silently degrade Arabic/Kurdish Notes back into an image-only PDF.
++            lines.asSequence()
++                .map { sanitize(it.text) }
++                .filter { it.isNotBlank() }
++                .forEach { font.encode(it) }
+ 
+             lines.groupBy { it.pageNumber }.forEach { (pageNumber, pageLines) ->
+                 val pageIndex = pageNumber - 1
+                 if (pageIndex !in 0 until document.numberOfPages) return@forEach
+                 val page = document.getPage(pageIndex)
++
+                 PDPageContentStream(
+                     document,
+                     page,
+-                    PDPageContentStream.AppendMode.PREPEND,
++                    PDPageContentStream.AppendMode.APPEND,
+                     true,
+                     true
+                 ).use { content ->
+-                    pageLines.forEach { line ->
++                    pageLines.forEach lineLoop@{ line ->
+                         val logical = sanitize(line.text)
+-                        if (logical.isBlank()) return@forEach
+-
+-                        val visual = renderText(logical, line.rtl)
+-                        if (visual.isBlank()) return@forEach
++                        if (logical.isBlank()) return@lineLoop
+ 
+                         val propsDictionary = COSDictionary().apply {
+                             setString(COSName.ACTUAL_TEXT, logical)
+@@ -72,30 +79,30 @@
+ 
+                         content.beginMarkedContent(COSName.getPDFName("Span"), props)
+                         content.beginText()
+-                        content.setRenderingMode(RenderingMode.FILL)
+-                        content.setNonStrokingColor(18, 50, 79)
+                         content.setFont(font, line.fontSize)
++                        content.setRenderingMode(RenderingMode.NEITHER)
+ 
+-                        val naturalWidth = runCatching {
+-                            font.getStringWidth(visual) / 1000f * line.fontSize
+-                        }.getOrDefault(0f)
+-                        val horizontalScale = if (naturalWidth > 0.01f && line.width > 0.01f) {
+-                            (line.width / naturalWidth * 100f).coerceIn(35f, 300f)
+-                        } else 100f
+-                        content.setHorizontalScaling(horizontalScale)
+-
++                        // Position the semantic object on the same baseline as its visible line.
++                        // It is intentionally non-painting: the visible glyphs were already drawn
++                        // by Android's StaticLayout, while /ActualText supplies canonical Unicode.
+                         val yFromBottom = page.mediaBox.height - line.baselineFromTop
+                         content.setTextMatrix(Matrix.getTranslateInstance(line.x, yFromBottom))
+-                        content.showText(visual)
++                        content.showText(logical)
+                         content.endText()
+                         content.endMarkedContent()
+                     }
+                 }
+             }
++
+             FileOutputStream(output).use(document::save)
+         }
+     }
+ 
++    private fun loadBundledUnicodeFont(context: Context, document: PDDocument): PDType0Font =
++        context.assets.open(BUNDLED_FONT_ASSET).use { stream ->
++            PDType0Font.load(document, stream, true)
++        }
++
+     private fun sanitize(text: String): String = text
+         .replace("\u0000", "")
+         .replace("\u202A", "")
+@@ -104,59 +111,4 @@
+         .replace("\u2066", "")
+         .replace("\u2067", "")
+         .replace("\u2069", "")
+-
+-    private fun renderText(logical: String, rtl: Boolean): String {
+-        // Keep the PDF text stream in logical Unicode order. The Android-rendered RTL
+-        // bitmap above it supplies the exact visual shaping, while this FILL-mode text
+-        // remains a genuine PDF text object for search, selection and PC import.
+-        return logical
+-    }
+-
+-    /**
+-     * Android vendors do not all ship the same Arabic font filenames. Some also ship
+-     * variable fonts that older PDFBox parsers cannot embed. Try several likely
+-     * system fonts and verify that the chosen font can actually encode the note text.
+-     */
+-    private fun loadUsableUnicodeFont(document: PDDocument, renderSamples: List<String>): PDType0Font? {
+-        return candidateSystemFonts().firstNotNullOfOrNull { file ->
+-            runCatching {
+-                val font = file.inputStream().use { PDType0Font.load(document, it, true) }
+-                renderSamples.forEach { sample -> font.encode(sample) }
+-                font
+-            }.getOrNull()
+-        }
+-    }
+-
+-    private fun candidateSystemFonts(): List<File> {
+-        val exact = listOf(
+-            "/system/fonts/NotoSansArabic-Regular.ttf",
+-            "/system/fonts/NotoNaskhArabic-Regular.ttf",
+-            "/system/fonts/NotoNaskhArabicUI-Regular.ttf",
+-            "/system/fonts/NotoSansArabicUI-Regular.ttf",
+-            "/system/fonts/DroidSansFallback.ttf"
+-        ).map(::File).filter { it.isFile && it.canRead() }
+-
+-        val scanned = File("/system/fonts")
+-            .listFiles()
+-            ?.asSequence()
+-            ?.filter {
+-                it.isFile && it.canRead() &&
+-                    (it.extension.equals("ttf", true) || it.extension.equals("otf", true))
+-            }
+-            ?.sortedBy { file ->
+-                val n = file.name.lowercase()
+-                when {
+-                    "arabic" in n -> 0
+-                    "naskh" in n -> 1
+-                    "kufi" in n -> 2
+-                    "droidsansfallback" in n -> 3
+-                    "noto" in n -> 4
+-                    else -> 5
+-                }
+-            }
+-            ?.toList()
+-            .orEmpty()
+-
+-        return (exact + scanned).distinctBy { it.absolutePath }
+-    }
+ }
