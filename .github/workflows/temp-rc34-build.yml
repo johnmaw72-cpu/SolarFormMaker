@@ -1,0 +1,201 @@
+name: RC34 Native Selectable PDF Notes
+
+on:
+  push:
+    branches: [chatgpt-rc34-native-pdf-notes-20260930]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build-rc34:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout RC34 build instructions
+        uses: actions/checkout@v4
+
+      - name: Download exact RC33 source artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: IGP-Organizer-Form-5.0.0-rc33-Real-PDF-Notes-APK-and-Source
+          path: /tmp/rc33-artifact
+          github-token: ${{ github.token }}
+          run-id: 36715057934
+
+      - name: Verify and unpack uploaded RC33 baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC=/tmp/rc33-artifact/IGP-Organizer-Form-5.0.0-rc33-source.zip
+          test -f "$SRC"
+          echo "19c19caed759336ec7fbfc468b78e8b2e4a4f338898841beb7a9f2f326dc2066  $SRC" | sha256sum -c -
+          rm -rf /tmp/igp-build
+          mkdir -p /tmp/igp-build
+          unzip -q "$SRC" -d /tmp/igp-build
+          ROOT=/tmp/igp-build/IGP
+          test -f "$ROOT/app/build.gradle.kts"
+          grep -Fq 'versionCode = 67' "$ROOT/app/build.gradle.kts"
+          grep -Fq 'versionName = "5.0.0-rc33"' "$ROOT/app/build.gradle.kts"
+          test -f "$ROOT/gradlew"
+          test -f "$ROOT/gradlew.bat"
+          test -f "$ROOT/gradle/wrapper/gradle-wrapper.jar"
+          grep -Fq 'gradle-9.4.1-' "$ROOT/gradle/wrapper/gradle-wrapper.properties"
+
+      - name: Apply RC34 real selectable Notes implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/igp-build/IGP
+          cd "$ROOT"
+          patch -p1 < "$GITHUB_WORKSPACE/build-input/rc34-native-pdf-notes.patch"
+          grep -Fq 'versionCode = 68' app/build.gradle.kts
+          grep -Fq 'versionName = "5.0.0-rc34"' app/build.gradle.kts
+          ! grep -Fq 'rasterizeNotes' app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt
+          grep -Fq 'textLayout.draw(canvas!!)' app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt
+          grep -Fq 'RenderingMode.NEITHER' app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt
+          grep -Fq 'ACTUAL_TEXT' app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt
+
+      - name: Bundle deterministic Arabic and Kurdish Unicode font
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y fonts-hosny-amiri
+          ROOT=/tmp/igp-build/IGP
+          FONT="$(find /usr/share/fonts -type f -name 'Amiri-Regular.ttf' | head -n1)"
+          test -n "$FONT"
+          mkdir -p "$ROOT/app/src/main/assets/fonts"
+          cp "$FONT" "$ROOT/app/src/main/assets/fonts/Amiri-Regular.ttf"
+          if [ -f /usr/share/doc/fonts-hosny-amiri/copyright ]; then
+            cp /usr/share/doc/fonts-hosny-amiri/copyright "$ROOT/app/src/main/assets/fonts/AMIRI-OFL.txt"
+          else
+            printf '%s\n' 'Amiri is distributed under the SIL Open Font License.' > "$ROOT/app/src/main/assets/fonts/AMIRI-OFL.txt"
+          fi
+          test -s "$ROOT/app/src/main/assets/fonts/Amiri-Regular.ttf"
+
+      - name: Add RC34 release notes and reproducible build workflow to source
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/igp-build/IGP
+          cat > "$ROOT/RC34_UPDATES.md" <<'EOF'
+          # RC34 — Native selectable Arabic/Kurdish PDF Notes
+
+          - Base: exact RC33 source ZIP (SHA-256 19c19caed759336ec7fbfc468b78e8b2e4a4f338898841beb7a9f2f326dc2066).
+          - Version: 5.0.0-rc34 / versionCode 68.
+          - The visible Load / Notes block is drawn directly to Android PdfDocument as text, not rendered into a bitmap.
+          - A bundled Amiri Unicode font supplies deterministic Type-0 PDF text semantics with /ActualText for Arabic/Sorani selection, copy, search and desktop import.
+          - No system-font lookup and no image-only fallback remain for Notes.
+          - Package/database behavior from RC33 is unchanged. The preview APK keeps the RC33 preview package and signing certificate for in-place upgrade compatibility.
+          EOF
+          mkdir -p "$ROOT/.github/workflows"
+          cat > "$ROOT/.github/workflows/android-build.yml" <<'EOF'
+          name: Android Build
+          on:
+            workflow_dispatch:
+            push:
+          jobs:
+            build:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v4
+                - uses: actions/setup-java@v4
+                  with:
+                    distribution: temurin
+                    java-version: '17'
+                - uses: android-actions/setup-android@v4
+                  with:
+                    packages: ''
+                - name: Install Android SDK 36
+                  run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+                - name: Verify Gradle wrapper
+                  run: |
+                    chmod +x gradlew
+                    ./gradlew --version
+                - name: Build debug APK
+                  run: ./gradlew --no-daemon clean assembleDebug
+          EOF
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+
+      - name: Install Android SDK 36
+        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Verify Gradle 9.4.1 wrapper
+        working-directory: /tmp/igp-build/IGP
+        run: |
+          chmod +x gradlew
+          ./gradlew --version | tee /tmp/gradle-version.txt
+          grep -Fq 'Gradle 9.4.1' /tmp/gradle-version.txt
+
+      - name: Prepare exact RC33 preview signing identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d "$GITHUB_WORKSPACE/build-input/v5_language_fix/preview-test-keystore.b64" > /tmp/igp-preview-test.jks
+          RC16="$GITHUB_WORKSPACE/.github/workflows/temp-rc16-build.yml"
+          echo "IGP_PREVIEW_KEYSTORE=/tmp/igp-preview-test.jks" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_STORE_PASSWORD=$(awk -F': ' '/IGP_PREVIEW_STORE_PASSWORD:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_ALIAS=$(awk -F': ' '/IGP_PREVIEW_KEY_ALIAS:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_PASSWORD=$(awk -F': ' '/IGP_PREVIEW_KEY_PASSWORD:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+
+      - name: Build RC34 APK
+        working-directory: /tmp/igp-build/IGP
+        run: ./gradlew --no-daemon clean assembleDebug
+
+      - name: Verify RC34 APK identity, version and signing compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/igp-build/IGP
+          APK="$ROOT/app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee /tmp/badging.txt
+          grep -Fq "package: name='com.infinitygreenpower.offerstudio.preview' versionCode='68' versionName='5.0.0-rc34-test'" /tmp/badging.txt
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/apksigner.txt
+          grep -Fiq '1f83a683d692d6530df5ba8e4ba1892e18bb11a313c5f744b464f3bf003c06f0' /tmp/apksigner.txt
+          unzip -l "$APK" | grep -F 'assets/fonts/Amiri-Regular.ttf'
+          test -s "$ROOT/app/src/main/assets/fonts/Amiri-Regular.ttf"
+
+      - name: Stage RC34 APK and complete source ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/igp-build/IGP
+          OUT="$GITHUB_WORKSPACE/out"
+          mkdir -p "$OUT"
+          cp "$ROOT/app/build/outputs/apk/debug/app-debug.apk" "$OUT/IGP-Organizer-Form-5.0.0-rc34-Real-Selectable-PDF-Notes.apk"
+          find "$ROOT" -type d \( -name build -o -name .gradle -o -name .kotlin \) -prune -exec rm -rf {} + || true
+          test -f "$ROOT/gradlew"
+          test -f "$ROOT/gradlew.bat"
+          test -f "$ROOT/gradle/wrapper/gradle-wrapper.jar"
+          test -f "$ROOT/gradle/wrapper/gradle-wrapper.properties"
+          test -f "$ROOT/app/src/main/assets/fonts/Amiri-Regular.ttf"
+          cd /tmp/igp-build
+          zip -qr "$OUT/IGP-Organizer-Form-5.0.0-rc34-source.zip" IGP
+          unzip -l "$OUT/IGP-Organizer-Form-5.0.0-rc34-source.zip" | grep -F 'IGP/gradle/wrapper/gradle-wrapper.jar'
+          unzip -l "$OUT/IGP-Organizer-Form-5.0.0-rc34-source.zip" | grep -F 'IGP/app/src/main/assets/fonts/Amiri-Regular.ttf'
+          sha256sum "$OUT/"*
+
+      - name: Upload RC34 APK and source
+        uses: actions/upload-artifact@v4
+        with:
+          name: IGP-Organizer-Form-5.0.0-rc34-APK-and-Source
+          path: out/*
+          if-no-files-found: error
+          retention-days: 7
