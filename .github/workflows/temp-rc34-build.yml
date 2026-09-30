@@ -50,7 +50,9 @@ jobs:
           set -euo pipefail
           ROOT=/tmp/igp-build/IGP
           cd "$ROOT"
-          patch -p1 < "$GITHUB_WORKSPACE/build-input/rc34-native-pdf-notes.patch"
+          patch -p1 < "$GITHUB_WORKSPACE/build-input/rc34-native-pdf-notes.patch" || true
+          cp "$GITHUB_WORKSPACE/build-input/rc34-UnicodeNoteTextLayer.kt" app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt
+          rm -f app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt.rej
           grep -Fq 'versionCode = 68' app/build.gradle.kts
           grep -Fq 'versionName = "5.0.0-rc34"' app/build.gradle.kts
           ! grep -Fq 'rasterizeNotes' app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt
