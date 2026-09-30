@@ -42,7 +42,7 @@ jobs:
           echo '049b00ffc2fabb4051a85b4b1abbdbaecd7127f359115c5bb976da92caba12cc  /tmp/rc33.patch' | sha256sum -c -
           cd "$ROOT"
           git apply /tmp/rc33.patch
-          git apply "$GITHUB_WORKSPACE/build-input/rc33_real_pdf_notes_fix.patch"
+          git apply -p0 "$GITHUB_WORKSPACE/build-input/rc33_real_pdf_notes_fix.patch"
           cat > RC33_UPDATES.md <<'EOF'
           # RC33 — PC-detectable PDF Notes
           Notes keep the proven Android RTL visual rendering and now also contain genuine
