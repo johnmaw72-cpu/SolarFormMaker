@@ -2,6 +2,7 @@ package com.infinitygreenpower.organizerform.export.pdf
 
 import android.content.Context
 import com.ibm.icu.text.ArabicShaping
+import com.ibm.icu.text.Bidi
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.cos.COSDictionary
 import com.tom_roush.pdfbox.cos.COSName
@@ -13,7 +14,6 @@ import com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode
 import com.tom_roush.pdfbox.util.Matrix
 import java.io.File
 import java.io.FileOutputStream
-import java.text.Bidi
 
 /**
  * RC35 single-source PDF Notes renderer.
@@ -123,41 +123,9 @@ object UnicodeNoteTextLayer {
             shaped,
             if (rtl) Bidi.DIRECTION_RIGHT_TO_LEFT else Bidi.DIRECTION_LEFT_TO_RIGHT
         )
-
-        val visual = StringBuilder(shaped.length)
-        for (runIndex in 0 until bidi.runCount) {
-            val start = bidi.getRunStart(runIndex)
-            val limit = bidi.getRunLimit(runIndex)
-            val level = bidi.getRunLevel(runIndex)
-            val run = shaped.substring(start, limit)
-            if ((level and 1) != 0) {
-                visual.append(reverseCodePointsAndMirror(run))
-            } else {
-                visual.append(run)
-            }
-        }
-        return visual.toString()
-    }
-
-    private fun reverseCodePointsAndMirror(text: String): String {
-        val cps = text.codePoints().toArray()
-        val result = StringBuilder(text.length)
-        for (i in cps.indices.reversed()) {
-            result.appendCodePoint(mirror(cps[i]))
-        }
-        return result.toString()
-    }
-
-    private fun mirror(cp: Int): Int = when (cp) {
-        '('.code -> ')'.code
-        ')'.code -> '('.code
-        '['.code -> ']'.code
-        ']'.code -> '['.code
-        '{'.code -> '}'.code
-        '}'.code -> '{'.code
-        '<'.code -> '>'.code
-        '>'.code -> '<'.code
-        else -> cp
+        return bidi.writeReordered(
+            Bidi.DO_MIRRORING.toInt() or Bidi.KEEP_BASE_COMBINING.toInt()
+        )
     }
 
     private fun containsArabicScript(text: String): Boolean = text.any { ch ->
