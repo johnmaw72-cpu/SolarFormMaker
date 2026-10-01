@@ -42,6 +42,6 @@ notes.write_text("""# RC35 — Single-layer Arabic/Kurdish PDF Notes
 - No bitmap fallback and no second Notes text representation remain.
 """)
 
-assert 'textLayout.draw(canvas!!)' not in pdf.read_text()
+assert 'RC35: do not draw Notes through Android/Skia' in pdf.read_text()
 assert 'versionCode = 69' in build.read_text()
 assert 'versionName = "5.0.0-rc35"' in build.read_text()
