@@ -10,6 +10,15 @@ text = text.replace('versionCode = 68', 'versionCode = 69', 1)
 text = text.replace('versionName = "5.0.0-rc34"', 'versionName = "5.0.0-rc35"', 1)
 build.write_text(text)
 
+# ICU4J supplies Arabic shaping for both Arabic and Sorani/Kurdish letters.
+text = build.read_text()
+dep = '    implementation("com.ibm.icu:icu4j:78.3")\n'
+anchor = '    implementation("com.tom-roush:pdfbox-android:2.0.27.0")\n'
+assert anchor in text
+if dep not in text:
+    text = text.replace(anchor, anchor + dep, 1)
+build.write_text(text)
+
 pdf = root / "app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt"
 text = pdf.read_text()
 old = """            // RC34: draw the visible Notes with StaticLayout directly on the PDF Canvas.
