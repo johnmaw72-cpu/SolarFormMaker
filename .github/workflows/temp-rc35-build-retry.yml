@@ -1,0 +1,96 @@
+name: RC35 Single-layer PDF Notes Retry
+on:
+  push:
+    branches: [chatgpt-rc35-single-pdf-notes-20261001]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  build-rc35:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download exact RC34 source artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: IGP-Organizer-Form-5.0.0-rc34-APK-and-Source
+          path: /tmp/rc34-artifact
+          github-token: ${{ github.token }}
+          run-id: 36728428514
+      - name: Prepare RC35 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC=/tmp/rc34-artifact/IGP-Organizer-Form-5.0.0-rc34-source.zip
+          echo "e6dfaea542076b47de2c499e2686302eb4b9382cfb9944b425fe6bd35e5e32a2  $SRC" | sha256sum -c -
+          rm -rf /tmp/igp-build && mkdir -p /tmp/igp-build
+          unzip -q "$SRC" -d /tmp/igp-build
+          python "$GITHUB_WORKSPACE/build-input/rc35_patch.py"
+          ROOT=/tmp/igp-build/IGP
+          cp "$GITHUB_WORKSPACE/build-input/rc35-UnicodeNoteTextLayer.kt" "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt"
+          grep -Fq 'versionCode = 69' "$ROOT/app/build.gradle.kts"
+          grep -Fq 'versionName = "5.0.0-rc35"' "$ROOT/app/build.gradle.kts"
+          grep -Fq 'RC35: do not draw Notes through Android/Skia' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt"
+          grep -Fq 'RenderingMode.FILL' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt"
+          grep -Fq 'ArabicShaping' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt"
+          grep -Fq 'ACTUAL_TEXT' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+      - name: Install Android SDK 36
+        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Verify Gradle wrapper
+        working-directory: /tmp/igp-build/IGP
+        run: |
+          chmod +x gradlew
+          ./gradlew --version | tee /tmp/gradle-version.txt
+          grep -Fq 'Gradle 9.4.1' /tmp/gradle-version.txt
+      - name: Prepare exact RC34 preview signing identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://raw.githubusercontent.com/johnmaw72-cpu/SolarFormMaker/chatgpt-v5-pdf-fix-build/build-input/v5_language_fix/preview-test-keystore.b64" | base64 -d > /tmp/igp-preview-test.jks
+          RC16="$GITHUB_WORKSPACE/.github/workflows/temp-rc16-build.yml"
+          echo "IGP_PREVIEW_KEYSTORE=/tmp/igp-preview-test.jks" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_STORE_PASSWORD=$(awk -F': ' '/IGP_PREVIEW_STORE_PASSWORD:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_ALIAS=$(awk -F': ' '/IGP_PREVIEW_KEY_ALIAS:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_PASSWORD=$(awk -F': ' '/IGP_PREVIEW_KEY_PASSWORD:/{print $2; exit}' "$RC16")" >> "$GITHUB_ENV"
+      - name: Build RC35 APK
+        working-directory: /tmp/igp-build/IGP
+        run: ./gradlew --no-daemon clean assembleDebug
+      - name: Verify RC35 APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/igp-build/IGP
+          APK="$ROOT/app/build/outputs/apk/debug/app-debug.apk"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee /tmp/badging.txt
+          grep -Fq "package: name='com.infinitygreenpower.offerstudio.preview' versionCode='69' versionName='5.0.0-rc35-test'" /tmp/badging.txt
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/apksigner.txt
+          grep -Fiq '1f83a683d692d6530df5ba8e4ba1892e18bb11a313c5f744b464f3bf003c06f0' /tmp/apksigner.txt
+      - name: Stage RC35 files
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/igp-build/IGP
+          OUT="$GITHUB_WORKSPACE/out"
+          mkdir -p "$OUT"
+          cp "$ROOT/app/build/outputs/apk/debug/app-debug.apk" "$OUT/IGP-Organizer-Form-5.0.0-rc35-Single-Layer-PDF-Notes.apk"
+          find "$ROOT" -type d \( -name build -o -name .gradle -o -name .kotlin \) -prune -exec rm -rf {} + || true
+          test -f "$ROOT/gradle/wrapper/gradle-wrapper.jar"
+          cd /tmp/igp-build
+          zip -qr "$OUT/IGP-Organizer-Form-5.0.0-rc35-source.zip" IGP
+          sha256sum "$OUT/"*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IGP-Organizer-Form-5.0.0-rc35-APK-and-Source
+          path: out/*
+          if-no-files-found: error
+          retention-days: 7
