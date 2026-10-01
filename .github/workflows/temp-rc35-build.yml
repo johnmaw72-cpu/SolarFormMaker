@@ -9,6 +9,10 @@ permissions:
   contents: read
   actions: read
 
+concurrency:
+  group: rc35-single-pdf-notes
+  cancel-in-progress: true
+
 jobs:
   build-rc35:
     runs-on: ubuntu-latest
