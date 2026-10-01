@@ -53,7 +53,18 @@ jobs:
           cp "$GITHUB_WORKSPACE/build-input/rc35-UnicodeNoteTextLayer.kt"             "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt"
           grep -Fq 'versionCode = 69' "$ROOT/app/build.gradle.kts"
           grep -Fq 'versionName = "5.0.0-rc35"' "$ROOT/app/build.gradle.kts"
-          ! grep -Fq 'textLayout.draw(canvas!!)' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt"
+          python - <<'PY'
+          from pathlib import Path
+          p=Path("/tmp/igp-build/IGP/app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt")
+          s=p.read_text()
+          start=s.index("private fun recordNoteParagraph")
+          end=s.index("\n        fun photoPage", start)
+          body=s[start:end]
+          assert "textLayout.draw(" not in body
+          assert "drawBitmap" not in body
+          assert "noteTextLayers +=" in body
+          print("RC35 recordNoteParagraph contains geometry only")
+          PY
           grep -Fq 'RenderingMode.FILL' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt"
           grep -Fq 'ArabicShaping' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt"
           grep -Fq 'ACTUAL_TEXT' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt"
