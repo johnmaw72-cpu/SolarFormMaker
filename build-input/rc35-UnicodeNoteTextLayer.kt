@@ -1,7 +1,7 @@
 package com.infinitygreenpower.organizerform.export.pdf
 
 import android.content.Context
-import android.icu.text.ArabicShaping
+import com.ibm.icu.text.ArabicShaping
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.cos.COSDictionary
 import com.tom_roush.pdfbox.cos.COSName
