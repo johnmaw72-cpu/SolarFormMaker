@@ -1,0 +1,170 @@
+name: RC36 Prepared Notes VFD PDF Fix
+
+on:
+  push:
+    branches: [chatgpt-rc36-prepared-vfd-refresh-20261010]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rc36-prepared-vfd-refresh
+  cancel-in-progress: true
+
+jobs:
+  build-rc36:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout RC36 build instructions
+        uses: actions/checkout@v4
+
+      - name: Reconstruct exact RC33 source from permanent patch chain
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          lines = Path('.github/workflows/temp-rc33-build.yml').read_text().splitlines()
+          for name in ['Reconstruct exact RC32 source', 'Apply RC33 real PDF notes patch']:
+              start = next(i for i,l in enumerate(lines) if l.strip() == f'- name: {name}')
+              run = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == 'run: |')
+              body = []
+              for line in lines[run + 1:]:
+                  if line.startswith('      - name:') or line.startswith('      - uses:'):
+                      break
+                  body.append(line[10:] if line.startswith('          ') else line)
+              script = Path('/tmp') / (name.lower().replace(' ', '_') + '.sh')
+              script.write_text('\n'.join(body).rstrip() + '\n')
+              subprocess.run(['bash', str(script)], check=True)
+          PY
+          ROOT=/tmp/igp-build/IGP
+          grep -Fq 'versionCode = 67' "$ROOT/app/build.gradle.kts"
+          grep -Fq 'versionName = "5.0.0-rc33"' "$ROOT/app/build.gradle.kts"
+
+      - name: Reconstruct RC34 source layer
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/igp-build/IGP
+          cd "$ROOT"
+          patch -p1 < "$GITHUB_WORKSPACE/build-input/rc34-native-pdf-notes.patch" || true
+          cp "$GITHUB_WORKSPACE/build-input/rc34-UnicodeNoteTextLayer.kt"              app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt
+          rm -f app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt.rej
+          grep -Fq 'versionCode = 68' app/build.gradle.kts
+          grep -Fq 'versionName = "5.0.0-rc34"' app/build.gradle.kts
+          grep -Fq 'textLayout.draw(canvas!!)' app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt
+
+      - name: Reconstruct exact RC35 source layer
+        shell: bash
+        run: |
+          set -euo pipefail
+          python "$GITHUB_WORKSPACE/build-input/rc35_patch.py"
+          ROOT=/tmp/igp-build/IGP
+          cp "$GITHUB_WORKSPACE/build-input/rc35-UnicodeNoteTextLayer.kt"              "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt"
+          grep -Fq 'versionCode = 69' "$ROOT/app/build.gradle.kts"
+          grep -Fq 'versionName = "5.0.0-rc35"' "$ROOT/app/build.gradle.kts"
+          grep -Fq 'notesOverlayPdf' "$ROOT/app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt"
+
+      - name: Apply RC36 updates
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '15fb8edf3dd6374e04850b78f300dfbfdfaaa4b88c96dc0a3dd5667afd8e9ca8  build-input/rc36.patch.gz.b64' | sha256sum -c -
+          base64 -d build-input/rc36.patch.gz.b64 | gzip -d > /tmp/rc36.patch
+          echo '1ddda44087957ccf290966f14dbf9396fa972f357166d14d11231cb9bed825cc  /tmp/rc36.patch' | sha256sum -c -
+          ROOT=/tmp/igp-build/IGP
+          cd "$ROOT"
+          patch -p1 < /tmp/rc36.patch
+
+          grep -Fq 'versionCode = 70' app/build.gradle.kts
+          grep -Fq 'versionName = "5.0.0-rc36"' app/build.gradle.kts
+          grep -Fq 'Segment(listOf("Hybrid","On-Grid","Off-Grid","VFD")' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormScreen.kt
+          grep -Fq 'منظومة شمسية زراعية' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormModels.kt
+          grep -Fq 'أما الشهري فيتغير بحسب الفصل ودرجة الحرارة' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormModels.kt
+          grep -Fq 'هذا النظام قادر على إنتاج الطاقة شهرية بالشكل التالي:' app/src/main/java/com/infinitygreenpower/organizerform/feature/form/FormModels.kt
+          grep -Fq 'createPreview' app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/PdfExporter.kt
+          grep -Fq 'COSName.TO_UNICODE' app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt
+          grep -Fq 'RenderingMode.NEITHER' app/src/main/java/com/infinitygreenpower/organizerform/export/pdf/UnicodeNoteTextLayer.kt
+          test -f app/src/test/java/com/infinitygreenpower/organizerform/feature/form/PreparedNotesRenderingTest.kt
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+
+      - name: Install Android SDK 36
+        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Gradle 9.4.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Ensure complete Gradle 9.4.1 wrapper
+        working-directory: /tmp/igp-build/IGP
+        run: |
+          gradle wrapper --gradle-version 9.4.1
+          chmod +x gradlew
+          ./gradlew --version | tee /tmp/gradle-version.txt
+          grep -Fq 'Gradle 9.4.1' /tmp/gradle-version.txt
+          test -s gradle/wrapper/gradle-wrapper.jar
+          grep -Fq 'gradle-9.4.1-bin.zip' gradle/wrapper/gradle-wrapper.properties
+
+      - name: Prepare RC35-compatible preview signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://raw.githubusercontent.com/johnmaw72-cpu/SolarFormMaker/chatgpt-v5-pdf-fix-build/build-input/v5_language_fix/preview-test-keystore.b64"             | base64 -d > /tmp/igp-preview-test.jks
+          keytool -list -keystore /tmp/igp-preview-test.jks -storepass 'IGPPreview2026!' -alias igp-preview >/dev/null
+          echo "IGP_PREVIEW_KEYSTORE=/tmp/igp-preview-test.jks" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_STORE_PASSWORD=IGPPreview2026!" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_ALIAS=igp-preview" >> "$GITHUB_ENV"
+          echo "IGP_PREVIEW_KEY_PASSWORD=IGPPreview2026!" >> "$GITHUB_ENV"
+
+      - name: Run RC36 tests and build APK
+        working-directory: /tmp/igp-build/IGP
+        run: ./gradlew --no-daemon clean testDebugUnitTest assembleDebug
+
+      - name: Verify RC36 APK identity and signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/igp-build/IGP
+          APK="$ROOT/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee /tmp/badging.txt
+          grep -Fq "package: name='com.infinitygreenpower.offerstudio.preview' versionCode='70' versionName='5.0.0-rc36-test'" /tmp/badging.txt
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/apksigner.txt
+          grep -Fiq '1f83a683d692d6530df5ba8e4ba1892e18bb11a313c5f744b464f3bf003c06f0' /tmp/apksigner.txt
+
+      - name: Stage RC36 APK and complete source
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/igp-build/IGP
+          OUT="$GITHUB_WORKSPACE/out"
+          mkdir -p "$OUT"
+          cp "$ROOT/app/build/outputs/apk/debug/app-debug.apk"              "$OUT/IGP-Organizer-Form-5.0.0-rc36-Prepared-VFD-PDF-Fix.apk"
+          find "$ROOT" -type d \( -name build -o -name .gradle -o -name .kotlin \) -prune -exec rm -rf {} + || true
+          test -s "$ROOT/gradle/wrapper/gradle-wrapper.jar"
+          cd /tmp/igp-build
+          zip -qr "$OUT/IGP-Organizer-Form-5.0.0-rc36-source.zip" IGP
+          unzip -l "$OUT/IGP-Organizer-Form-5.0.0-rc36-source.zip" | grep -F 'IGP/gradle/wrapper/gradle-wrapper.jar'
+          sha256sum "$OUT/"*
+
+      - name: Upload RC36 APK and source
+        uses: actions/upload-artifact@v4
+        with:
+          name: IGP-Organizer-Form-5.0.0-rc36-APK-and-Source
+          path: out/*
+          if-no-files-found: error
+          retention-days: 7
