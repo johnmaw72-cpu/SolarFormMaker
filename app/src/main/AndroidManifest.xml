@@ -1,23 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application
-        android:allowBackup="true"
-        android:label="@string/app_name"
-        android:icon="@drawable/ic_offer_studio"
-        android:theme="@style/AppTheme"
-        android:supportsRtl="true">
-        <activity
-            android:name=".OfferStudioV481Activity"
-            android:screenOrientation="portrait"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-        <provider
-            android:name=".SimpleFileProvider"
-            android:authorities="${applicationId}.provider"
-            android:exported="false"
-            android:grantUriPermissions="true" />
-    </application>
-</manifest>
+<uses-permission android:name="android.permission.BYDAUTO_TYRE_GET" />
+<uses-permission android:name="android.permission.BYDAUTO_TYRE_COMMON" />
+<application android:label="Seal TPMS Monitor" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false" android:usesCleartextTraffic="false">
+<activity android:name=".MainActivity" android:exported="true">
+<intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+</activity></application></manifest>

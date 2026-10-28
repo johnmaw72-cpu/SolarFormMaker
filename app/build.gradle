@@ -1,45 +1,13 @@
 plugins { id 'com.android.application' }
-
 android {
-    namespace 'com.infinitygreenpower.solarform'
-    compileSdk 35
-
-    signingConfigs {
-        stableDebug {
-            storeFile file("$rootDir/signing/solarform-debug.keystore")
-            storePassword 'SolarForm123'
-            keyAlias 'solarform'
-            keyPassword 'SolarForm123'
-        }
-    }
-
-    defaultConfig {
-        applicationId 'com.infinitygreenpower.offerstudio'
-        minSdk 23
-        targetSdk 35
-        versionCode 31
-        versionName '4.8.1'
-    }
-
-    sourceSets {
-        main {
-            java {
-                include '**/OfferStudioActivity.java'
-                include '**/OfferStudioFixedActivity.java'
-                include '**/OfferStudioV41CompatActivity.java'
-                include '**/OfferStudioV440Activity.java'
-                include '**/OfferStudioV450Activity.java'
-                include '**/OfferStudioV470Activity.java'
-                include '**/OfferStudioV480Activity.java'
-                include '**/OfferStudioV481Activity.java'
-                include '**/SimpleFileProvider.java'
-            }
-        }
-    }
-
-    buildTypes {
-        debug {
-            signingConfig signingConfigs.stableDebug
-        }
-    }
+ namespace 'com.seal05.tpms'
+ compileSdk 35
+ defaultConfig {
+  applicationId 'com.seal05.tpms'
+  minSdk 23
+  targetSdk 28
+  versionCode 2
+  versionName '0.1.1'
+ }
+ compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
